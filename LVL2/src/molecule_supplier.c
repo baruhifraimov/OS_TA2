@@ -31,8 +31,8 @@
 #include <sys/wait.h>
 #include <signal.h>
 #include <ctype.h>
-#include "const.h"
-#include "atom_warehouse_funcs.h"
+#include "../include/const.h"
+#include "../include/functions/atom_warehouse_funcs.h"
 #include <poll.h>
 
 int main(int argc, char*argv[])
@@ -55,10 +55,10 @@ int main(int argc, char*argv[])
     const char* PORT = argv[1];
 
     // Socket file descriptors
-    int sockfd, new_fd;  // sockfd = listening socket, new_fd = client connection socket
+    int tcp_sockfd, new_fd;  // sockfd = listening socket, new_fd = client connection socket
     
     // Network address structures for server setup
-    struct addrinfo hints, *servinfo, *p;  // hints = criteria, servinfo = results list, p = iterator
+    struct addrinfo tcp_hints, *tcp_servinfo, *tcp_p;  // hints = criteria, servinfo = results list, p = iterator
     struct sockaddr_storage their_addr;    // Storage for client's address information
     socklen_t sin_size;                    // Size of client address structure
     
@@ -69,34 +69,35 @@ int main(int argc, char*argv[])
     int rv;                      // Return value for getaddrinfo()
 
     // STEP 1: Configure server address criteria
-    memset(&hints, 0, sizeof hints);
-    hints.ai_family = AF_INET;      // Use IPv4
-    hints.ai_socktype = SOCK_STREAM; // Use TCP (reliable, connection-oriented)
-    hints.ai_flags = AI_PASSIVE;    // Use local machine's IP address
+    memset(&tcp_hints, 0, sizeof tcp_hints);
+    tcp_hints.ai_family = AF_INET;      // Use IPv4
+    tcp_hints.ai_socktype = SOCK_STREAM; // Use TCP (reliable, connection-oriented)
+    tcp_hints.ai_flags = AI_PASSIVE;    // Use local machine's IP address
 
     // STEP 2: Get list of possible addresses to bind to
-    if ((rv = getaddrinfo(NULL, PORT, &hints, &servinfo)) != 0) {
+    if ((rv = getaddrinfo(NULL, PORT, &tcp_hints, &tcp_servinfo)) != 0) {
         fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
         return 1;
     }
 
+
     // STEP 3: Try to create socket and bind to first available address
-    for(p = servinfo; p != NULL; p = p->ai_next) {
+    for(tcp_p = tcp_servinfo; tcp_p != NULL; tcp_p = tcp_p->ai_next) {
         // Create socket with the address family, type, and protocol
-        if ((sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
+        if ((tcp_sockfd = socket(tcp_p->ai_family, tcp_p->ai_socktype, tcp_p->ai_protocol)) == -1) {
             perror("server: socket");
             continue;  // Try next address if socket creation fails
         }
 
         // Allow socket address to be reused (prevents "Address already in use" error)
-        if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
+        if (setsockopt(tcp_sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
             perror("setsockopt");
             exit(1);
         }
 
         // Bind socket to the address and port
-        if (bind(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
-            close(sockfd);
+        if (bind(tcp_sockfd, tcp_p->ai_addr, tcp_p->ai_addrlen) == -1) {
+            close(tcp_sockfd);
             perror("server: bind");
             continue;  // Try next address if bind fails
         }
@@ -104,16 +105,52 @@ int main(int argc, char*argv[])
         break;  // Success! Exit the loop
     }
 
-    freeaddrinfo(servinfo); // Clean up the address list
+    freeaddrinfo(tcp_servinfo); // Clean up the address list
 
     // Check if we successfully bound to an address
-    if (p == NULL)  {
+    if (tcp_p == NULL)  {
         fprintf(stderr, "server: failed to bind\n");
         exit(1);
     }
 
+
+
+    // Create UDP socket, same as above TCP configuration
+    int udp_sockfd;
+    struct addrinfo udp_hints, *udp_servinfo, *udp_p;
+    memset(&udp_hints, 0, sizeof udp_hints);
+    udp_hints.ai_family = AF_INET;
+    udp_hints.ai_socktype = SOCK_DGRAM;
+    udp_hints.ai_flags = AI_PASSIVE;
+
+    if ((rv = getaddrinfo(NULL, PORT, &udp_hints, &udp_servinfo)) != 0) {
+        fprintf(stderr, "getaddrinfo (UDP): %s\n", gai_strerror(rv));
+        exit(1);
+    }
+
+    for(udp_p = udp_servinfo; udp_p != NULL; udp_p = udp_p->ai_next) {
+        if ((udp_sockfd = socket(udp_p->ai_family, udp_p->ai_socktype, udp_p->ai_protocol)) == -1) {
+            perror("server: udp socket");
+            continue;
+        }
+        if (bind(udp_sockfd, udp_p->ai_addr, udp_p->ai_addrlen) == -1) {
+            close(udp_sockfd);
+            perror("server: udp bind");
+            continue;
+        }
+        break;
+    }
+    freeaddrinfo(udp_servinfo);
+
+    if (udp_p == NULL) {
+        fprintf(stderr, "server: failed to bind UDP socket\n");
+        exit(1);
+    }
+
+
+
     // STEP 4: Start listening for client connections
-    if (listen(sockfd, BACKLOG) == -1) {
+    if (listen(tcp_sockfd, BACKLOG) == -1) {
         perror("listen");
         exit(1);
     }
@@ -121,11 +158,13 @@ int main(int argc, char*argv[])
 
     // Array of pollfd structures to track file descriptors
     struct pollfd fds[BACKLOG + 1];  // +1 for the listening socket
-    int nfds = 1;  // Number of file descriptors to monitor (start with just the listening socket)
 
     // Initialize the first pollfd to watch for incoming connections on the listener socket
-    fds[0].fd = sockfd;
+    fds[0].fd = tcp_sockfd;
     fds[0].events = POLLIN;  // Watch for incoming data
+    fds[1].fd = udp_sockfd;
+    fds[1].events = POLLIN;
+    int nfds = 2;  // Number of file descriptors to monitor the first TCP and UDP
 
     printf("server: waiting for connections...\n");
 
@@ -146,27 +185,30 @@ int main(int argc, char*argv[])
         // Loop through all file descriptors to check for events
         for (int i = 0; i < nfds; i++) {
             // Skip if this fd has no events
-            if (fds[i].revents == 0) {
+            if (fds[i].revents == 0) {continue;}
+
+            // Handle errors on this file descriptor
+            if (fds[i].revents & (POLLERR | POLLHUP | POLLNVAL)) {
+               // Only close and remove if this is NOT the listening socket or UDP socket
+                if (fds[i].fd != tcp_sockfd && fds[i].fd != udp_sockfd) {
+                    close(fds[i].fd);
+                    fds[i] = fds[nfds - 1];
+                    nfds--;
+                    i--;
+                } else {
+                    // For listening/UDP sockets, just print error and continue
+                    fprintf(stderr, "Critical error on listening or UDP socket (fd %d). Server should exit or restart!\n", fds[i].fd);
+                    // Optionally: exit(1);
+                }
                 continue;
             }
 
-        
-        // Handle errors on this file descriptor
-        if (fds[i].revents & (POLLERR | POLLHUP | POLLNVAL)) {
-        close(fds[i].fd);
-        
-        // Remove this fd from the array by copying the last one to its place
-        fds[i] = fds[nfds - 1];
-        nfds--;
-        i--;  // Process the same index again since we moved an fd here
-        continue;
-        }
-
-        if (fds[i].fd == sockfd && (fds[i].revents & POLLIN)) {
+        // // TCP listening socket
+        if (fds[i].fd == tcp_sockfd && (fds[i].revents & POLLIN)) {
             // Accept new connection
             sin_size = sizeof their_addr;
             // Accept incoming client connection (blocks until client connects)
-            new_fd = accept(sockfd, (struct sockaddr *)&their_addr, &sin_size);
+            new_fd = accept(tcp_sockfd, (struct sockaddr *)&their_addr, &sin_size);
             if (new_fd == -1) {
                 perror("accept");
             } else {
@@ -189,7 +231,30 @@ int main(int argc, char*argv[])
             }
         }
 
-         // Handle data from existing client
+        // Handle UDP socket
+        if (fds[i].fd == udp_sockfd && (fds[i].revents & POLLIN)) {
+            char udp_buf[MAXDATASIZE];
+            struct sockaddr_storage udp_client_addr;
+            socklen_t udp_addr_len = sizeof udp_client_addr;
+            int udp_numbytes = recvfrom(udp_sockfd, udp_buf, sizeof(udp_buf) - 1, 0,
+                                        (struct sockaddr *)&udp_client_addr, &udp_addr_len);
+            if (udp_numbytes > 0) {
+                udp_buf[udp_numbytes] = '\0';
+
+                // Process the message
+                char response[256];
+                process_message(udp_buf, udp_numbytes, UDP_HANDLE, response, sizeof(response));
+
+                // Send response back to UDP client
+                if (sendto(udp_sockfd, response, strlen(response), 0,
+                        (struct sockaddr *)&udp_client_addr, udp_addr_len) == -1) {
+                    perror("sendto");
+                }
+            }
+            continue; // Done with UDP, continue to next fd
+        }
+
+         // Handle data from existing TCP client
          else if (fds[i].revents & POLLIN) {
             // This is a client socket with data to read
             char buf[MAXDATASIZE];
@@ -207,26 +272,24 @@ int main(int argc, char*argv[])
                     perror("recv");
                 }
                 
-                // Close the socket
-                close(fds[i].fd);
-                
                 // Remove this fd from the array (by replacing him with the last fd)
-                fds[i] = fds[nfds - 1];
-                nfds--;
-                i--;  // Process the same index again since we moved an fd here
+                // Only remove if this is NOT the listening socket or UDP socket
+                if (fds[i].fd != tcp_sockfd && fds[i].fd != udp_sockfd) {
+                    close(fds[i].fd);
+                    fds[i] = fds[nfds - 1];
+                    nfds--;
+                    i--;
+                }
             } else {
                 // We have data from a client
                 buf[numbytes] = '\0';
                 // printf("server: received '%s' on socket %d\n", buf, fds[i].fd);
                 
-                // Process the message (with shared counters because no fork)
-                process_message(buf, numbytes);
+                // Process the message
+                char response[256];
+                process_message(buf, numbytes, TCP_HANDLE,response, sizeof(response));
                 
-                // Send response back to client
-                char response[100];
-                snprintf(response, sizeof(response), 
-                         "Recieved message");
-                         
+                // send message to client
                 if (send(fds[i].fd, response, strlen(response), 0) == -1) {
                     perror("send");
                 }

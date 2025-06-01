@@ -1,4 +1,3 @@
-#pragma once
 #include <stdio.h>      // Standard input/output functions (printf, fprintf, etc.)
 #include <stdlib.h>     // General utilities (exit, malloc, etc.)
 #include <unistd.h>     // UNIX standard functions (close, etc.)
@@ -10,17 +9,11 @@
 #include <sys/socket.h> // Socket API definitions
 #include <ctype.h>
 #include <arpa/inet.h>  // Functions for manipulating IP addresses (inet_ntop, etc.)
-#include "const.hpp"
+#include "../../include/const.h"
+#include "../../include/functions/atom_supplier_funcs.h"
+#include "../../include/elements.h"
 
-/**
- * @brief Prompts user to select atom type and quantity, 
- * storing results in the provided parameters
- * 
- * @param amount Amount of the attoms
- * @param atom The specified atom
- * @param atom_size The size of the string
- */
-void ask_client(unsigned int* amount, char* atom, size_t atom_size) {
+void ask_supplier(unsigned int* amount, char* atom, size_t atom_size) {
     int index = 0;
     
     memset(atom, 0, atom_size);  // Safe clearing
@@ -48,13 +41,35 @@ void ask_client(unsigned int* amount, char* atom, size_t atom_size) {
     atom[atom_size-1] = '\0';  // Ensure null-termination
 }
 
-/**
- * Helper function to handle both IPv4 and IPv6 addresses.
- * Returns pointer to the address in the sockaddr structure.
- * 
- * @param sa Pointer to sockaddr structure (could be IPv4 or IPv6)
- * @return Pointer to the IP address part of the structure
- */
+void ask_requester(unsigned int* amount, char* element, size_t element_size) {
+    int index = 0;
+    
+    memset(element, 0, element_size);  // Safe clearing
+    
+    printf("Enter your desired choice:\n(1) WATER\n(2) CARBON DIOXIDE\n(3) GLUCOSE\n(4) ALCOHOL\n");
+    if (scanf("%d", &index) != 1) {
+        fprintf(stderr, "Error: Invalid input\n");
+        return;
+    }
+    
+    printf("Enter your desired amount:\n");
+    if (scanf("%d", amount) != 1) {  // %llu for unsigned long long
+        fprintf(stderr, "Error: Invalid amount\n");
+        return;
+    }
+    
+    switch(index) {
+        case 1: strncpy(element, "WATER", element_size-1); break;
+        case 2: strncpy(element, "CARBON DIOXIDE", element_size-1); break;
+        case 3: strncpy(element, "GLUCOSE", element_size-1); break;
+        case 4: strncpy(element, "ALCOHOL", element_size-1); break;
+        default: 
+            fprintf(stderr, "Error: Invalid selection\n");
+            return;
+    }
+    element[element_size-1] = '\0';  // Ensure null-termination
+}
+
 void *get_in_addr(struct sockaddr *sa)
 {
     // Check if the address is IPv4

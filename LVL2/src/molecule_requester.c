@@ -16,8 +16,8 @@
 #include <sys/socket.h> // Socket API definitions
 #include <ctype.h>
 #include <arpa/inet.h>  // Functions for manipulating IP addresses (inet_ntop, etc.)
-#include "const.h"
-#include "atom_supplier_funcs.h"
+#include "../include/const.h"
+#include "../include/functions/atom_supplier_funcs.h"
 
 int main(int argc, char *argv[])
 {
@@ -26,9 +26,7 @@ int main(int argc, char *argv[])
     char buf[MAXDATASIZE];          // Buffer to store received data
     struct addrinfo hints;          // Criteria for address selection
     struct addrinfo *servinfo;      // Linked list of results from getaddrinfo
-    struct addrinfo *p;             // Pointer to traverse servinfo list
     int rv;                         // Return value for getaddrinfo
-    char s[INET6_ADDRSTRLEN];       // Buffer to store string representation of IP address
 
     // Check if all the needed args was provided as a command-line argument
     if (argc != 3) {
@@ -51,7 +49,7 @@ int main(int argc, char *argv[])
     // Initialize hints structure with zeros
     memset(&hints, 0, sizeof hints);
     hints.ai_family = AF_UNSPEC;    // Allow either IPv4 or IPv6
-    hints.ai_socktype = SOCK_STREAM; // Use TCP stream sockets
+    hints.ai_socktype = SOCK_DGRAM; // Use UDP dgram sockets
 
     // Get address information for the server using the provided hostname
     if ((rv = getaddrinfo(IP, PORT, &hints, &servinfo)) != 0) {
@@ -59,66 +57,41 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-
-
-    // Loop through all the results and connect to the first server we can
-    for(p = servinfo; p != NULL; p = p->ai_next) {
-        // Try to create a socket with the current address info
-        if ((sockfd = socket(p->ai_family, p->ai_socktype,
-                p->ai_protocol)) == -1) {
-            perror("client: socket");
-            continue;  // If socket creation fails, try the next address
-        }
-
-        // Convert the IP address to a readable string format and display it
-        inet_ntop(p->ai_family,
-            get_in_addr((struct sockaddr *)p->ai_addr),
-            s, sizeof s);
-        printf("client: attempting connection to %s\n", s);
-
-        // Attempt to connect to the server
-        if (connect(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
-            perror("client: connect");
-            close(sockfd);  // Close the socket if connection fails
-            continue;       // Try the next address
-        }
-
-        break;  // If we get here, we successfully connected
+    struct sockaddr_in server_addr;
+    socklen_t addr_len = sizeof(server_addr);
+    
+    // create a UDP socket
+    sockfd = socket(AF_INET,SOCK_DGRAM,0);
+    if(sockfd < 0){
+        perror("SOCKET CREATION FAILED");
+        exit(1);
     }
 
-    // If p is NULL, it means we couldn't connect to any address
-    if (p == NULL) {
-        fprintf(stderr, "client: failed to connect\n");
-        return 2;
-    }
+    memset(&server_addr, 0,addr_len);
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(atoi(PORT));
 
-    // Convert connected server's address to string and print it
-    inet_ntop(p->ai_family, get_in_addr((struct sockaddr *)p->ai_addr),
-            s, sizeof s);
-    printf("client: connected to %s\n", s);
-
-    freeaddrinfo(servinfo); // Free the linked list of addresses, no longer needed
+    inet_pton(AF_INET,IP,&server_addr.sin_addr);
 
     // GET USER INPUT
     unsigned int amount;
-    char atom[10];
-    ask_client(&amount, atom, sizeof(atom));
+    char element[20];
+    ask_requester(&amount, element, sizeof(element));
 
     // Format the message to send to server: ADD {atom} {amount}
     char send_buf[MAXDATASIZE];
-    snprintf(send_buf, MAXDATASIZE, "ADD %s %u", atom, amount);
+    snprintf(send_buf, MAXDATASIZE, "DELIVER %s %u", element, amount);
 
     // Send the formatted request to server
-    if (send(sockfd, send_buf, strlen(send_buf), 0) == -1) {
-        perror("send");
+    if (sendto(sockfd, send_buf, strlen(send_buf), 0, (struct sockaddr*)&server_addr, addr_len) == -1) {
+        perror("sendto");
         close(sockfd);
         exit(1);
     }
 
     printf("client: sent request --> '%s'\n", send_buf);
 
-    // Receive data from the server
-    if ((numbytes = recv(sockfd, buf, MAXDATASIZE-1, 0)) == -1) {
+    if ((numbytes = recvfrom(sockfd, buf, MAXDATASIZE-1, 0, (struct sockaddr*)&server_addr, &addr_len)) == -1) {
         perror("recv");
         exit(1);
     }

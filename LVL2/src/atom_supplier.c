@@ -16,8 +16,8 @@
 #include <sys/socket.h> // Socket API definitions
 #include <ctype.h>
 #include <arpa/inet.h>  // Functions for manipulating IP addresses (inet_ntop, etc.)
-#include "const.h"
-#include "atom_supplier_funcs.h"
+#include "../include/const.h"
+#include "../include/functions/atom_supplier_funcs.h"
 
 int main(int argc, char *argv[])
 {
@@ -102,7 +102,7 @@ int main(int argc, char *argv[])
     // GET USER INPUT
     unsigned int amount;
     char atom[10];
-    ask_client(&amount, atom, sizeof(atom));
+    ask_supplier(&amount, atom, sizeof(atom));
 
     // Format the message to send to server: ADD {atom} {amount}
     char send_buf[MAXDATASIZE];

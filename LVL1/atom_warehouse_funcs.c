@@ -1,5 +1,3 @@
-#pragma once
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -13,33 +11,19 @@
 #include <sys/wait.h>
 #include <signal.h>
 #include <ctype.h>
-#include "const.hpp"
+#include "const.h"
+#include "atom_warehouse_funcs.h"
 
-#define BACKLOG 10   // Maximum number of pending client connections in the queue
+// At the beginning of atom_warehouse_funcs.c, add these definitions:
+unsigned long long carbon = 0;
+unsigned long long oxygen = 0;
+unsigned long long hydrogen = 0;
 
-// Warehouse supply, (unsigned long long = 10^18)
-static unsigned long long carbon = 0;
-static unsigned long long oxygen = 0;
-static unsigned long long hydrogen = 0;
-
-/**
- * @brief Prints the whole warehouse storage
- */
 void print_storage(){
     printf("CARBON #:%lld \nOXYGEN #:%lld \nHYDROGEN #:%lld\n",carbon, oxygen, hydrogen);
     return;
 }
 
-/**
- * @brief processes a message buffer containing a command, 
- * an atom type, and an amount. It validates the message format, 
- * updates counters for specific atom types (CARBON, OXYGEN, HYDROGEN) 
- * if the command is "ADD," and prints the updated storage, 
- * while handling errors for invalid formats or unknown atom types.
- * 
- * @param buf The message we want to handle
- * @param size_buf Size of the message
- */
 void process_message(char* buf, size_t size_buf){
     // Parse the command
     char cmd[10], atom_type[20];
@@ -74,12 +58,6 @@ void process_message(char* buf, size_t size_buf){
     }
 }
 
-
-/**
- * @brief Signal handler for cleaning up zombie child processes
- * When a child process (handling a client) terminates, this prevents zombie processes
- * by properly reaping the dead child processes using waitpid()
- */
 void sigchld_handler(int s)
 {
     (void)s; // quiet unused variable warning
@@ -92,11 +70,6 @@ void sigchld_handler(int s)
     errno = saved_errno;
 }
 
-/**
- * @brief Helper function to extract IP address from sockaddr structure
- * Works with both IPv4 and IPv6 addresses by checking the address family
- * Returns pointer to the actual IP address part of the structure
- */
 void *get_in_addr(struct sockaddr *sa)
 {
     if (sa->sa_family == AF_INET) {
