@@ -7,9 +7,9 @@ SRC = ./src/
 SRCFNC = ./src/functions/
 
 
-all: atom_supplier.out molecule_supplier.out molecule_requester.out
+all: atom_supplier.out drinks_bar.out molecule_requester.out
 
-molecule_supplier.out: $(OBJ)molecule_supplier.o $(OBJ)atom_warehouse_funcs.o
+drinks_bar.out: $(OBJ)drinks_bar.o $(OBJ)atom_warehouse_funcs.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 atom_supplier.out: $(OBJ)atom_supplier.o $(OBJ)atom_supplier_funcs.o
