@@ -16,11 +16,6 @@
 #include "../../include/functions/atom_warehouse_funcs.h"
 #include "../../include/elements.h"
 
-// At the beginning of atom_warehouse_funcs.c, add these definitions:
-unsigned long long carbon = 0;
-unsigned long long oxygen = 0;
-unsigned long long hydrogen = 0;
-
 unsigned long long get_water_num(unsigned long long oxygen, unsigned long long hydrogen){
     unsigned long long counter = 0;
     while(oxygen > 1 && hydrogen > 2){

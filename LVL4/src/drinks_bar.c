@@ -34,25 +34,138 @@
 #include "../include/const.h"
 #include "../include/functions/atom_warehouse_funcs.h"
 #include <poll.h>
+#include <unistd.h>
+#include <getopt.h>
+// for get opt
+extern char *optarg;
+extern int optind, opterr, optopt;
+
+// initializing ports for both UDP and TCP
+char* TCP_PORT = 0;
+char* UDP_PORT = 0;
+
+// alarm value
+int alarm_timeout = 0;
+
+// STORAGE:
+unsigned long long carbon = 0;
+unsigned long long oxygen = 0;
+unsigned long long hydrogen = 0;
+
+// TODO MAKE A .H file
+void alarm_handler(int signum){
+    fprintf(stdout,"Server didnt recieved any input in the past %d seconds\nTERMINATING!\n", alarm_timeout);
+    exit(0);
+}
+
 
 int main(int argc, char*argv[])
 {
+
      // Check if port was provided as a command-line argument
-     if (argc != 2) {
-        fprintf(stderr,"usage: ./atom_warehouse.out <port>\n");
+     if (argc < 4) {
+        fprintf(stderr,"usage: ./drinks_bar.out -T/--tcp-port <int> -U/--udp-port <int> (OPTIONAL: -o/--oxygen <int=0> -c/--carbon <int=0> -h/--hydrogen <int=0> -t/--timeout <int=0>\n");
         exit(1);
     }
 
-    // check that the argv[1] is only a number, else throw an error and exit
-    for (int i = 0; i < strlen(argv[1]); i++) {
-        if (!isdigit(argv[1][i])) {
-            fprintf(stderr, "Error: port must be a number\n");
-            exit(1);
-        }
-    }
+    struct option longopts[] = {
+        {"udp-port",required_argument,NULL,'U'},
+        {"tcp-port",required_argument,NULL,'T'},
+        {"oxygen",optional_argument,NULL,'o'},
+        {"carbon",optional_argument,NULL,'c'},
+        {"hydrogen",optional_argument,NULL,'h'},
+        {"timeout",optional_argument,NULL,'t'},
+        {0,0,0,0}
+    };
 
-    // Create PORT number that have been provided from user
-    const char* PORT = argv[1];
+    // check then option you got from the user:
+    int ret = getopt_long(argc, argv, "U:T:o:c:h:t:", longopts, NULL);
+    char *endptr; // for checking if the value is digit
+    long val = 0;
+
+    while(ret != -1){
+        switch(ret){
+            case 'U': {
+                if (optarg == NULL) {
+                    fprintf(stderr, "Missing argument for option -%c\n", ret);
+                    exit(1);
+                }
+                val = strtol(optarg, &endptr, 10);
+                if (*endptr != '\0' || val <= 0 || val > 65535) {
+                    fprintf(stderr,"Invalid argument for UDP PORT\n");
+                    exit(1);
+                }
+                UDP_PORT = optarg;
+                break;
+            }
+            case 'T': {
+                if (optarg == NULL) {
+                    fprintf(stderr, "Missing argument for option -%c\n", ret);
+                    exit(1);
+                }
+                val = strtol(optarg, &endptr, 10);
+                if (*endptr != '\0') {
+                    fprintf(stderr,"Invalid argument for TCP PORT\n");
+                    exit(1);
+                }
+                TCP_PORT = optarg;
+                break;
+            }
+            case 'o': {
+                if (optarg == NULL) {
+                    fprintf(stderr, "Missing argument for option -%c\n", ret);
+                    exit(1);
+                }
+                val = strtol(optarg, &endptr, 10);
+                if (*endptr != '\0') {
+                    fprintf(stderr,"Invalid argument for Oxygen\n");
+                    exit(1);
+                }
+                oxygen = (unsigned long long)val;
+                break;
+            }
+            case 'c': {
+                if (optarg == NULL) {
+                    fprintf(stderr, "Missing argument for option -%c\n", ret);
+                    exit(1);
+                }
+                val = strtol(optarg, &endptr, 10);
+                if (*endptr != '\0') {
+                    fprintf(stderr,"Invalid argument for Carbon\n");
+                    exit(1);
+                }
+                carbon = (unsigned long long)val;
+                break;
+            }
+            case 'h': {
+                if (optarg == NULL) {
+                    fprintf(stderr, "Missing argument for option -%c\n", ret);
+                    exit(1);
+                }
+                val = strtol(optarg, &endptr, 10);
+                if (*endptr != '\0') {
+                    fprintf(stderr,"Invalid argument for Hydrogen\n");
+                    exit(1);
+                }
+                hydrogen = (unsigned long long)val;
+                break;
+            }
+            case 't': {
+                if (optarg == NULL) {
+                    fprintf(stderr, "Missing argument for option -%c\n", ret);
+                    exit(1);
+                }
+                val = strtol(optarg, &endptr, 10);
+                if (*endptr != '\0') {
+                    fprintf(stderr,"Invalid argument for Timeout\n");
+                    exit(1);
+                }
+                alarm_timeout = (int)val;
+                break;
+            }
+        }
+        ret = getopt_long(argc, argv, "U:T:o:c:h:t:", longopts, NULL);
+    }
 
     // Socket file descriptors
     int tcp_sockfd, new_fd;  // sockfd = listening socket, new_fd = client connection socket
@@ -75,7 +188,7 @@ int main(int argc, char*argv[])
     tcp_hints.ai_flags = AI_PASSIVE;    // Use local machine's IP address
 
     // STEP 2: Get list of possible addresses to bind to
-    if ((rv = getaddrinfo(NULL, PORT, &tcp_hints, &tcp_servinfo)) != 0) {
+    if ((rv = getaddrinfo(NULL, TCP_PORT, &tcp_hints, &tcp_servinfo)) != 0) {
         fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
         return 1;
     }
@@ -123,7 +236,7 @@ int main(int argc, char*argv[])
     udp_hints.ai_socktype = SOCK_DGRAM;
     udp_hints.ai_flags = AI_PASSIVE;
 
-    if ((rv = getaddrinfo(NULL, PORT, &udp_hints, &udp_servinfo)) != 0) {
+    if ((rv = getaddrinfo(NULL, UDP_PORT, &udp_hints, &udp_servinfo)) != 0) {
         fprintf(stderr, "getaddrinfo (UDP): %s\n", gai_strerror(rv));
         exit(1);
     }
@@ -170,9 +283,15 @@ int main(int argc, char*argv[])
 
     printf("server: waiting for connections...\n");
 
+    signal(SIGALRM,alarm_handler);
+
     // STEP 6: Main server loop - accept and handle client connections
     // TODO: NEED TO CHANGE TO IO MUX INSTEAD OF FORK PER CLIENT
     while(1) {
+
+            // START alarm // TODO CHANGE THE INT TO USER INPUT INT
+            alarm(alarm_timeout);
+
         sin_size = sizeof their_addr;
         
         // Wait for activity on the sockets (blocks until activity occurs)
@@ -186,6 +305,7 @@ int main(int argc, char*argv[])
 
         // Loop through all file descriptors to check for events
         for (int i = 0; i < nfds; i++) {
+
             // Skip if this fd has no events
             if (fds[i].revents == 0) {continue;}
 
@@ -205,16 +325,16 @@ int main(int argc, char*argv[])
                 continue;
             }
 
+
+
+
         // KEYBOARD listening socket
         if (fds[i].fd == STDIN_FILENO && (fds[i].revents & POLLIN)) {
 
+                    alarm(0); // RESET ALARM
+
                     char server_input[256] = {0}; // setting a new buffer for user input
                     char response[100] = {0};
-
-                    // Add the new connection to our array
-                    fds[nfds].fd = new_fd;
-                    fds[nfds].events = POLLIN;
-                    nfds++;
                     
                     printf("KEYBOARD: ");
 
@@ -230,6 +350,9 @@ int main(int argc, char*argv[])
 
         // TCP listening socket
         if (fds[i].fd == tcp_sockfd && (fds[i].revents & POLLIN)) {
+
+            alarm(0); // RESET ALARM
+
             // Accept new connection
             sin_size = sizeof their_addr;
             // Accept incoming client connection (blocks until client connects)
@@ -258,6 +381,9 @@ int main(int argc, char*argv[])
 
         // Handle UDP socket
         if (fds[i].fd == udp_sockfd && (fds[i].revents & POLLIN)) {
+
+            alarm(0); // RESET ALARM
+
             char udp_buf[MAXDATASIZE];
             struct sockaddr_storage udp_client_addr;
             socklen_t udp_addr_len = sizeof udp_client_addr;
@@ -281,6 +407,9 @@ int main(int argc, char*argv[])
 
          // Handle data from existing TCP client
          else if (fds[i].revents & POLLIN) {
+
+            alarm(0); // RESET ALARM
+
             // This is a client socket with data to read
             char buf[MAXDATASIZE];
             int numbytes;
@@ -320,6 +449,9 @@ int main(int argc, char*argv[])
                 }
             }
         }
+
+
+        // END OF ALARM
     }
 
 }
