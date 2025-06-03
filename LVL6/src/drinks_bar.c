@@ -41,21 +41,23 @@
 extern char *optarg;
 extern int optind, opterr, optopt;
 
-// initializing ports for both UDP and TCP
+// initializing ports for both UDP and TCP + FD Storage
 char* TCP_PORT = 0;
 char* UDP_PORT = 0;
 char* UNIX_TCP_SOCKET_PATH = NULL;
 char* UNIX_UDP_SOCKET_PATH = NULL;
+char* STORAGE_FILE = 0;
 
 // alarm value
 extern int alarm_timeout;
 
-// STORAGE:
-unsigned long long carbon = 0;
-unsigned long long oxygen = 0;
-unsigned long long hydrogen = 0;
+// flag for storage file
+u_int8_t file_flag = 0;
 
-
+// flags for -o -h -c
+u_int8_t o_flag = 0;
+u_int8_t h_flag = 0;
+u_int8_t c_flag = 0;
 
 int main(int argc, char*argv[])
 {
@@ -75,16 +77,26 @@ int main(int argc, char*argv[])
         {"timeout",optional_argument,NULL,'t'},
         {"stream-path",optional_argument,NULL,'s'},
         {"datagram-path",optional_argument,NULL,'d'},
+        {"save-file",optional_argument,NULL,'f'},
         {0,0,0,0}
     };
 
     // check then option you got from the user:
-    int ret = getopt_long(argc, argv, "U:T:d:s:o:c:h:t:", longopts, NULL);
+    int ret = getopt_long(argc, argv, "U:T:d:s:o:c:h:t:f:", longopts, NULL);
     char *endptr; // for checking if the value is digit
     long val = 0;
 
     while(ret != -1){
         switch(ret){
+            case 'f':{
+                if (optarg == NULL) {
+                    fprintf(stderr, "ERROR: Missing argument for option -%c\n", ret);
+                    exit(1);
+                }
+                STORAGE_FILE = optarg;
+                file_flag =1;
+            }
+                break;
             case 'U': {
                 if (optarg == NULL) {
                     fprintf(stderr, "ERROR: Missing argument for option -%c\n", ret);
@@ -137,7 +149,8 @@ int main(int argc, char*argv[])
                     fprintf(stderr,"ERROR: Invalid argument for Oxygen\n");
                     exit(1);
                 }
-                oxygen = (unsigned long long)val;
+                warehouse.oxygen = (unsigned long long)val;
+                o_flag = 1;
                 break;
             }
             case 'c': {
@@ -150,7 +163,8 @@ int main(int argc, char*argv[])
                     fprintf(stderr,"ERROR: Invalid argument for Carbon\n");
                     exit(1);
                 }
-                carbon = (unsigned long long)val;
+                warehouse.carbon = (unsigned long long)val;
+                c_flag = 1;
                 break;
             }
             case 'h': {
@@ -163,7 +177,8 @@ int main(int argc, char*argv[])
                     fprintf(stderr,"ERROR: Invalid argument for Hydrogen\n");
                     exit(1);
                 }
-                hydrogen = (unsigned long long)val;
+                warehouse.hydrogen = (unsigned long long)val;
+                h_flag = 1;
                 break;
             }
             case 't': {
@@ -183,7 +198,15 @@ int main(int argc, char*argv[])
                 fprintf(stderr,"ERROR: usage: ./drinks_bar.out -T/--tcp-port <int> -U/--udp-port <int> (OPTIONAL: -o/--oxygen <int=0> -c/--carbon <int=0> -h/--hydrogen <int=0> -t/--timeout <int=0>\n");
                 exit(1);
         }
-        ret = getopt_long(argc, argv, "U:T:d:s:o:c:h:t:", longopts, NULL);
+        ret = getopt_long(argc, argv, "U:T:d:s:o:c:h:t:f:", longopts, NULL);
+    }
+
+    // if file flag is on, chec if file exists
+    //  TRUE    - Export file to the storage and update each change into the file (ignore -o -h -c additions)
+    //  FALSE   - Import current storage into the file and update each change into the file
+    // ignore -h -o -c values , else don't.
+    if(file_flag){
+        // TODO CHECK
     }
 
     // Socket file descriptors
@@ -275,7 +298,7 @@ int main(int argc, char*argv[])
         fprintf(stderr, "server: failed to bind UDP socket\n");
         exit(1);
     }
-    
+
     int unix_tcp_sockfd;
     // UNIX DOMAIN SOCKETS CREATION
     if(UNIX_TCP_SOCKET_PATH != NULL){
@@ -358,6 +381,7 @@ int main(int argc, char*argv[])
     fds[4].events = POLLIN;
     }
     int nfds = 5;  // Number of file descriptors to monitor the first TCP and UDP
+
 
     printf("server: waiting for connections...\n");
 
