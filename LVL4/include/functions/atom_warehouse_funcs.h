@@ -101,3 +101,9 @@ unsigned long long get_alcohol_num(unsigned long long carbon, unsigned long long
  * @return Maximum number of glucose molecules that can be formed
  */
 unsigned long long get_glucose_num(unsigned long long carbon, unsigned long long oxygen, unsigned long long hydrogen);
+
+/**
+ * @brief Alarm handle, handles the SIGALRM signal
+ * 
+ */
+void alarm_handler(int signum);

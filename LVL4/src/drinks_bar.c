@@ -45,18 +45,13 @@ char* TCP_PORT = 0;
 char* UDP_PORT = 0;
 
 // alarm value
-int alarm_timeout = 0;
+extern int alarm_timeout;
 
 // STORAGE:
 unsigned long long carbon = 0;
 unsigned long long oxygen = 0;
 unsigned long long hydrogen = 0;
 
-// TODO MAKE A .H file
-void alarm_handler(int signum){
-    fprintf(stdout,"Server didnt recieved any input in the past %d seconds\nTERMINATING!\n", alarm_timeout);
-    exit(0);
-}
 
 
 int main(int argc, char*argv[])
@@ -87,12 +82,12 @@ int main(int argc, char*argv[])
         switch(ret){
             case 'U': {
                 if (optarg == NULL) {
-                    fprintf(stderr, "Missing argument for option -%c\n", ret);
+                    fprintf(stderr, "ERROR: Missing argument for option -%c\n", ret);
                     exit(1);
                 }
                 val = strtol(optarg, &endptr, 10);
                 if (*endptr != '\0' || val <= 0 || val > 65535) {
-                    fprintf(stderr,"Invalid argument for UDP PORT\n");
+                    fprintf(stderr,"ERROR: Invalid argument for UDP PORT\n");
                     exit(1);
                 }
                 UDP_PORT = optarg;
@@ -100,12 +95,12 @@ int main(int argc, char*argv[])
             }
             case 'T': {
                 if (optarg == NULL) {
-                    fprintf(stderr, "Missing argument for option -%c\n", ret);
+                    fprintf(stderr, "ERROR: Missing argument for option -%c\n", ret);
                     exit(1);
                 }
                 val = strtol(optarg, &endptr, 10);
                 if (*endptr != '\0') {
-                    fprintf(stderr,"Invalid argument for TCP PORT\n");
+                    fprintf(stderr,"ERROR: Invalid argument for TCP PORT\n");
                     exit(1);
                 }
                 TCP_PORT = optarg;
@@ -113,12 +108,12 @@ int main(int argc, char*argv[])
             }
             case 'o': {
                 if (optarg == NULL) {
-                    fprintf(stderr, "Missing argument for option -%c\n", ret);
+                    fprintf(stderr, "ERROR: Missing argument for option -%c\n", ret);
                     exit(1);
                 }
                 val = strtol(optarg, &endptr, 10);
                 if (*endptr != '\0') {
-                    fprintf(stderr,"Invalid argument for Oxygen\n");
+                    fprintf(stderr,"ERROR: Invalid argument for Oxygen\n");
                     exit(1);
                 }
                 oxygen = (unsigned long long)val;
@@ -126,12 +121,12 @@ int main(int argc, char*argv[])
             }
             case 'c': {
                 if (optarg == NULL) {
-                    fprintf(stderr, "Missing argument for option -%c\n", ret);
+                    fprintf(stderr, "ERROR: Missing argument for option -%c\n", ret);
                     exit(1);
                 }
                 val = strtol(optarg, &endptr, 10);
                 if (*endptr != '\0') {
-                    fprintf(stderr,"Invalid argument for Carbon\n");
+                    fprintf(stderr,"ERROR: Invalid argument for Carbon\n");
                     exit(1);
                 }
                 carbon = (unsigned long long)val;
@@ -139,12 +134,12 @@ int main(int argc, char*argv[])
             }
             case 'h': {
                 if (optarg == NULL) {
-                    fprintf(stderr, "Missing argument for option -%c\n", ret);
+                    fprintf(stderr, "ERROR: Missing argument for option -%c\n", ret);
                     exit(1);
                 }
                 val = strtol(optarg, &endptr, 10);
                 if (*endptr != '\0') {
-                    fprintf(stderr,"Invalid argument for Hydrogen\n");
+                    fprintf(stderr,"ERROR: Invalid argument for Hydrogen\n");
                     exit(1);
                 }
                 hydrogen = (unsigned long long)val;
@@ -152,17 +147,20 @@ int main(int argc, char*argv[])
             }
             case 't': {
                 if (optarg == NULL) {
-                    fprintf(stderr, "Missing argument for option -%c\n", ret);
+                    fprintf(stderr, "ERROR: Missing argument for option -%c\n", ret);
                     exit(1);
                 }
                 val = strtol(optarg, &endptr, 10);
                 if (*endptr != '\0') {
-                    fprintf(stderr,"Invalid argument for Timeout\n");
+                    fprintf(stderr,"ERROR: Invalid argument for Timeout\n");
                     exit(1);
                 }
                 alarm_timeout = (int)val;
                 break;
             }
+            default:
+                fprintf(stderr,"ERROR: usage: ./drinks_bar.out -T/--tcp-port <int> -U/--udp-port <int> (OPTIONAL: -o/--oxygen <int=0> -c/--carbon <int=0> -h/--hydrogen <int=0> -t/--timeout <int=0>\n");
+                exit(1);
         }
         ret = getopt_long(argc, argv, "U:T:o:c:h:t:", longopts, NULL);
     }

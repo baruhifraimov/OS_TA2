@@ -18,6 +18,15 @@
 #include <arpa/inet.h>  // Functions for manipulating IP addresses (inet_ntop, etc.)
 #include "../include/const.h"
 #include "../include/functions/atom_supplier_funcs.h"
+#include <unistd.h>
+#include <getopt.h>
+
+// for get opt
+extern char *optarg;
+extern int optind, opterr, optopt;
+
+const char* IP; // The IP number the client will connect to on the server
+const char* PORT; // The port number the client will connect to on the server
 
 int main(int argc, char *argv[])
 {
@@ -28,22 +37,46 @@ int main(int argc, char *argv[])
     struct addrinfo *servinfo;      // Linked list of results from getaddrinfo
     int rv;                         // Return value for getaddrinfo
 
-    // Check if all the needed args was provided as a command-line argument
-    if (argc != 3) {
-        fprintf(stderr,"usage: ./atom_supplier.out <IP or hostname> <port>\n");
+     // Check if all the needed args was provided as a command-line argument
+     if (argc != 5) {
+        fprintf(stderr,"usage: ./atom_supplier.out -h <IP/hostname> -p <port>\n");
         exit(1);
     }
 
-	 // check that the argv[1] is only a number, else throw an error and exit
-	 for (int i = 0; i < strlen(argv[2]); i++) {
-        if (!isdigit(argv[2][i])) {
-            fprintf(stderr, "Error: port must be a number\n");
-            exit(1);
-        }
-    }
 
-	const char* IP = argv[1]; // The IP number the client will connect to on the server
-    const char* PORT = argv[2]; // The port number the client will connect to on the server
+    // check then option you got from the user:
+    int ret = getopt(argc, argv, "p:h:");
+    char *endptr; // for checking if the value is digit
+    long val = 0;
+
+    while(ret != -1){
+        switch(ret){
+            case 'p': {
+                if (optarg == NULL) {
+                    fprintf(stderr, "Missing argument for option -%c\n", ret);
+                    exit(1);
+                }
+                val = strtol(optarg, &endptr, 10);
+                if (*endptr != '\0' || val <= 0 || val > 65535) {
+                    fprintf(stderr,"Invalid argument for PORT\n");
+                    exit(1);
+                }
+                PORT = optarg;
+                break;
+            }
+            case 'h': {
+                if (optarg == NULL) {
+                    fprintf(stderr, "Missing argument for option -%c\n", ret);
+                    exit(1);
+                }
+                val = strtol(optarg, &endptr, 10);
+                IP = optarg;
+                break;
+            }
+         
+        }
+        ret = getopt(argc, argv, "p:h:");
+    }
 
 
     // Initialize hints structure with zeros

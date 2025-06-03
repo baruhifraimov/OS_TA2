@@ -16,6 +16,8 @@
 #include "../../include/functions/atom_warehouse_funcs.h"
 #include "../../include/elements.h"
 
+int alarm_timeout = 0;
+
 unsigned long long get_water_num(unsigned long long oxygen, unsigned long long hydrogen){
     unsigned long long counter = 0;
     while(oxygen > 1 && hydrogen > 2){
@@ -259,4 +261,9 @@ void *get_in_addr(struct sockaddr *sa)
     }
 
     return &(((struct sockaddr_in6*)sa)->sin6_addr);
+}
+
+void alarm_handler(int signum){
+    fprintf(stdout,"Server didnt recieved any input in the past %d seconds\nTERMINATING!\n", alarm_timeout);
+    exit(0);
 }
