@@ -29,6 +29,7 @@ const char* IP; // The IP number the client will connect to on the server
 const char* PORT; // The port number the client will connect to on the server
 
 
+
 int main(int argc, char *argv[])
 {
     int sockfd;                     // Socket file descriptor
@@ -56,12 +57,12 @@ int main(int argc, char *argv[])
         switch(ret){
             case 'p': {
                 if (optarg == NULL) {
-                    fprintf(stderr, "Missing argument for option -%c\n", ret);
+                    fprintf(stderr, "ERROR: Missing argument for option -%c\n", ret);
                     exit(1);
                 }
                 val = strtol(optarg, &endptr, 10);
                 if (*endptr != '\0' || val <= 0 || val > 65535) {
-                    fprintf(stderr,"Invalid argument for PORT\n");
+                    fprintf(stderr,"ERROR: Invalid argument for PORT\n");
                     exit(1);
                 }
                 PORT = optarg;
@@ -69,14 +70,13 @@ int main(int argc, char *argv[])
             }
             case 'h': {
                 if (optarg == NULL) {
-                    fprintf(stderr, "Missing argument for option -%c\n", ret);
+                    fprintf(stderr, "ERROR: Missing argument for option -%c\n", ret);
                     exit(1);
                 }
                 val = strtol(optarg, &endptr, 10);
                 IP = optarg;
                 break;
             }
-         
         }
         ret = getopt(argc, argv, "p:h:");
     }
