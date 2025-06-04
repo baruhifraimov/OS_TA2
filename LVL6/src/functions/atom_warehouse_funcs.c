@@ -15,11 +15,66 @@
 #include "../../include/const.h"
 #include "../../include/functions/atom_warehouse_funcs.h"
 #include "../../include/elements.h"
+#include <sys/file.h>  // flock
 
 int alarm_timeout = 0;
 
 // Global warehouse instance
 AtomStorage warehouse = {0};
+
+void save_to_file(int fd){
+
+    // LOCK THE FILE, IF ERROR, END PROCCESS
+    if (flock(fd, LOCK_EX) == -1){
+        perror("flock");
+        close(fd);
+        exit(1);
+    }
+
+    // Seek to beginning of file
+    if (lseek(fd, 0, SEEK_SET) == -1) {
+        perror("lseek");
+        close(fd);
+        exit(1);
+    }
+
+    // check if write failed
+    if(write(fd, &warehouse, sizeof(AtomStorage)) == -1){
+        perror("writre failed");
+        close(fd);
+        exit(1);
+    }
+
+    // UNLOCK THE LOCK
+    flock(fd, LOCK_UN);
+}
+
+void reload_from_file(int fd){
+
+    // LOCK THE FILE, IF ERROR, END PROCCESS
+    if (flock(fd, LOCK_EX) == -1){
+        perror("flock");
+        close(fd);
+        exit(1);
+    }
+
+    // Seek to beginning of file
+    if (lseek(fd, 0, SEEK_SET) == -1) {
+        perror("lseek");
+        close(fd);
+        exit(1);
+    }
+
+    // check if write failed
+    if(read(fd, &warehouse, sizeof(AtomStorage)) == -1){
+        perror("read failed");
+        close(fd);
+        exit(1);
+    }
+
+    // UNLOCK THE LOCK
+    flock(fd, LOCK_UN);
+}
 
 void init_warehouse(unsigned long long c, unsigned long long o, unsigned long long h) {
     warehouse.carbon = c;
@@ -80,7 +135,8 @@ void format_storage(char *out, size_t out_size) {
 }
 
 
-void process_message(char* buf, size_t size_buf, u_int8_t sock_handle, char *response, size_t response_size){
+void process_message(char* buf, size_t size_buf, u_int8_t sock_handle, char *response, size_t response_size, int file_flag, int fd){
+    reload_from_file(fd);
     // Parse the command
     char cmd[10], element_str[20];
     Element element;
@@ -113,6 +169,7 @@ void process_message(char* buf, size_t size_buf, u_int8_t sock_handle, char *res
                         "ERROR: Unkown atom type\n");
                     return;
             }
+            save_to_file(fd);
             format_storage(response, response_size);
             // Print the storage to server console
             print_storage();
@@ -176,6 +233,7 @@ void process_message(char* buf, size_t size_buf, u_int8_t sock_handle, char *res
                         "ERROR: Unkown mulecule type\n");
                     return;
                     }
+                save_to_file(fd);
                 printf("\n-- UPDATE --\n");
                 print_storage();
             }

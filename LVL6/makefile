@@ -28,7 +28,7 @@ $(OBJ)%.o: $(SRC)%.c
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 clean:
-	rm -f *.o *.out
+	rm -f *.o *.out *.txt
 	rm -r obj
 	clear
 

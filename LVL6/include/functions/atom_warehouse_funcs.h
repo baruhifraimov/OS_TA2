@@ -28,6 +28,23 @@ typedef struct AtomStorage {
 // Global storage instance
 extern AtomStorage warehouse;
 
+/**
+ * @brief Each itteration that the system wants to do a subtraction or addition operation, 
+ * it calls reloard to reload the last saved values of the storage warehosue
+ * 
+ * @param fd file descriptor of the storage file
+ */
+void reload_from_file(int fd);
+
+/**
+ * @brief Takes the file, lock it for parallel usage (mutex)
+ *  seek it to the start,
+ *  overwrites the new data and releases the lock.
+ * 
+ * @param fd file descriptor of the storage file
+ */
+void save_to_file(int fd);
+
 // Initialize the warehouse with default values
 void init_warehouse(unsigned long long c, unsigned long long o, unsigned long long h);
 
@@ -48,8 +65,9 @@ void print_storage();
 * @param sock_handle Determines if UDP or TCP
 * @param response the response we want to send to the client
 * @param response_size size of the response
+* @param file_flag file flag for updating the storage file in parallel
 */
-void process_message(char* buf, size_t size_buf, u_int8_t sock_handle, char *response, size_t response_size);
+void process_message(char* buf, size_t size_buf, u_int8_t sock_handle, char *response, size_t response_size, int file_flag, int fd);
 
 /**
  * @brief Signal handler for cleaning up zombie child processes

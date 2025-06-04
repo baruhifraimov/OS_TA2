@@ -37,6 +37,10 @@
 #include <unistd.h>
 #include <getopt.h>
 #include <sys/un.h>
+#include <fcntl.h>   // open
+#include <sys/stat.h>  // level of access to files
+#include <sys/file.h>  // flock
+
 // for get opt
 extern char *optarg;
 extern int optind, opterr, optopt;
@@ -55,9 +59,9 @@ extern int alarm_timeout;
 u_int8_t file_flag = 0;
 
 // flags for -o -h -c
-u_int8_t o_flag = 0;
-u_int8_t h_flag = 0;
-u_int8_t c_flag = 0;
+unsigned long long oxygen_input = 0;
+unsigned long long hydrogen_input = 0;
+unsigned long long carbon_input = 0;
 
 int main(int argc, char*argv[])
 {
@@ -149,8 +153,8 @@ int main(int argc, char*argv[])
                     fprintf(stderr,"ERROR: Invalid argument for Oxygen\n");
                     exit(1);
                 }
-                warehouse.oxygen = (unsigned long long)val;
-                o_flag = 1;
+                oxygen_input = (unsigned long long)val;
+
                 break;
             }
             case 'c': {
@@ -163,8 +167,7 @@ int main(int argc, char*argv[])
                     fprintf(stderr,"ERROR: Invalid argument for Carbon\n");
                     exit(1);
                 }
-                warehouse.carbon = (unsigned long long)val;
-                c_flag = 1;
+                carbon_input = (unsigned long long)val;
                 break;
             }
             case 'h': {
@@ -177,8 +180,7 @@ int main(int argc, char*argv[])
                     fprintf(stderr,"ERROR: Invalid argument for Hydrogen\n");
                     exit(1);
                 }
-                warehouse.hydrogen = (unsigned long long)val;
-                h_flag = 1;
+                hydrogen_input = (unsigned long long)val;
                 break;
             }
             case 't': {
@@ -205,8 +207,61 @@ int main(int argc, char*argv[])
     //  TRUE    - Export file to the storage and update each change into the file (ignore -o -h -c additions)
     //  FALSE   - Import current storage into the file and update each change into the file
     // ignore -h -o -c values , else don't.
+    // *********************************
+    // *                               *
+    // * <CARBON> <OXYGEN> <HYDROGEN>  *
+    // *                               *
+    // *********************************
+    int fd = open(STORAGE_FILE, O_RDWR, S_IRUSR | S_IWUSR);
     if(file_flag){
-        // TODO CHECK
+        if(fd != -1){ // IF FILE EXISTS
+            int reader = read(fd, &warehouse, sizeof(AtomStorage));
+
+            // FILE EXISTS BUT NO INPUT
+            if( reader < 0){
+                perror("read");
+                close(fd);
+                exit(1);
+            }
+
+            // IF NO STRUCT SIZE, WRONG FORMAT, ERROR
+            if (reader != sizeof(AtomStorage)) {
+                perror("read");
+                close(fd);
+                return 0;
+            }
+
+        }else{ // FILE DOESNT EXISTS, CREATE IT AND UPDATE ITS FIELD
+            fprintf(stdout,"WARNING: File: %s, creating file and storing storage predefined input",STORAGE_FILE);
+            fd = open(STORAGE_FILE, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+
+            // UPDATE THE CURRENT STORAGE FROM USER INPUT
+            warehouse.carbon = carbon_input;
+            warehouse.oxygen = oxygen_input;
+            warehouse.hydrogen =  hydrogen_input;
+
+            // LOCK THE FILE, IF ERROR, END PROCCESS
+            if (flock(fd, LOCK_EX) == -1){
+                perror("flock");
+                close(fd);
+                exit(1);
+            }
+
+            // CHECK FOR WRITE ISSUES
+            if(write(fd, &warehouse, sizeof(AtomStorage)) == -1){
+                perror("write");
+                close(fd);
+                exit(1);
+            }
+
+            // UNLOCK THE LOCK
+            flock(fd, LOCK_UN);
+        }
+    }else{
+        // No file flag, only user input
+        warehouse.carbon = carbon_input;
+        warehouse.oxygen = oxygen_input;
+        warehouse.hydrogen =  hydrogen_input;
     }
 
     // Socket file descriptors
@@ -439,12 +494,38 @@ int main(int argc, char*argv[])
 
                     // chec if no error occured
                     if(fgets(server_input,sizeof(server_input),stdin) != NULL){
-                        process_message(server_input,strlen(server_input)+1,KEYBOARD_HANDLE,response,sizeof(response));
+                        process_message(server_input, strlen(server_input)+1, KEYBOARD_HANDLE, response, sizeof(response), file_flag, fd);
                         printf("%s\n", response);
 
                     }
 
             continue;
+        }
+
+        // Handle UDP socket
+        if (fds[i].fd == udp_sockfd && (fds[i].revents & POLLIN)) {
+
+            alarm(0); // RESET ALARM
+
+            char udp_buf[MAXDATASIZE];
+            struct sockaddr_storage udp_client_addr;
+            socklen_t udp_addr_len = sizeof udp_client_addr;
+            int udp_numbytes = recvfrom(udp_sockfd, udp_buf, sizeof(udp_buf) - 1, 0,
+                                        (struct sockaddr *)&udp_client_addr, &udp_addr_len);
+            if (udp_numbytes > 0) {
+                udp_buf[udp_numbytes] = '\0';
+
+                // Process the message
+                char response[256];
+                process_message(udp_buf, udp_numbytes, UDP_HANDLE, response, sizeof(response), file_flag, fd);
+
+                // Send response back to UDP client
+                if (sendto(udp_sockfd, response, strlen(response), 0,
+                        (struct sockaddr *)&udp_client_addr, udp_addr_len) == -1) {
+                    perror("sendto");
+                }
+            }
+            continue; // Done with UDP, continue to next fd
         }
 
         // TCP listening socket, handles connection establishments
@@ -478,7 +559,7 @@ int main(int argc, char*argv[])
             }
         }
 
-                // UNIX TCP listening socket, handles connection establishments
+        // UNIX TCP listening socket, handles connection establishments
         if (fds[i].fd == unix_tcp_sockfd && (fds[i].revents & POLLIN)) {
 
             alarm(0); // RESET ALARM
@@ -508,48 +589,48 @@ int main(int argc, char*argv[])
         }
 
         // Handle data from existing TCP client
-        else if ((fds[i].revents & POLLIN)&& fds[i].fd != unix_tcp_sockfd && fds[i].fd != udp_sockfd && fds[i].fd != unix_udp_sockfd && fds[i].fd != STDIN_FILENO) {
+        if ((fds[i].revents & POLLIN)&& fds[i].fd != unix_tcp_sockfd && fds[i].fd != udp_sockfd && fds[i].fd != unix_udp_sockfd && fds[i].fd != STDIN_FILENO) {
 
-        alarm(0); // RESET ALARM
+            alarm(0); // RESET ALARM
 
-        // This is a client socket with data to read
-        char buf[MAXDATASIZE];
-        int numbytes;
+            // This is a client socket with data to read
+            char buf[MAXDATASIZE];
+            int numbytes;
 
-        // Receive data
-        numbytes = recv(fds[i].fd, buf, sizeof(buf) - 1, 0);
+            // Receive data
+            numbytes = recv(fds[i].fd, buf, sizeof(buf) - 1, 0);
 
-        if (numbytes < 1) {
-            // Error or connection closed
-            if (numbytes == 0) {
-                // Connection closed normally
-                // printf("server: socket %d hung up\n", fds[i].fd);
+            if (numbytes < 1) {
+                // Error or connection closed
+                if (numbytes == 0) {
+                    // Connection closed normally
+                    // printf("server: socket %d hung up\n", fds[i].fd);
+                } else {
+                    perror("recv");
+                }
+                
+                // Remove this fd from the array (by replacing him with the last fd)
+                // Only remove if this is NOT the listening socket or UDP socket
+                if (fds[i].fd != tcp_sockfd && fds[i].fd != udp_sockfd) {
+                    close(fds[i].fd);
+                    fds[i] = fds[nfds - 1];
+                    nfds--;
+                    i--;
+                }
             } else {
-                perror("recv");
-            }
-            
-            // Remove this fd from the array (by replacing him with the last fd)
-            // Only remove if this is NOT the listening socket or UDP socket
-            if (fds[i].fd != tcp_sockfd && fds[i].fd != udp_sockfd) {
-                close(fds[i].fd);
-                fds[i] = fds[nfds - 1];
-                nfds--;
-                i--;
-            }
-        } else {
-            // We have data from a client
-            buf[numbytes] = '\0';
-            // printf("server: received '%s' on socket %d\n", buf, fds[i].fd);
-            
-            // Process the message
-            char response[256];
-            process_message(buf, numbytes, TCP_HANDLE,response, sizeof(response));
-            
-            // send message to client
-            if (send(fds[i].fd, response, strlen(response), 0) == -1) {
-                perror("send");
-                 }
-            }
+                // We have data from a client
+                buf[numbytes] = '\0';
+                // printf("server: received '%s' on socket %d\n", buf, fds[i].fd);
+                
+                // Process the message
+                char response[256];
+                process_message(buf, numbytes, TCP_HANDLE,response, sizeof(response), file_flag, fd);
+                
+                // send message to client
+                if (send(fds[i].fd, response, strlen(response), 0) == -1) {
+                    perror("send");
+                    }
+                }
         }       
 
         // Handle UNIX UDP socket
@@ -567,7 +648,7 @@ int main(int argc, char*argv[])
 
                 // Process the message
                 char response[256];
-                process_message(udp_buf, unix_udp_numbytes, UDP_HANDLE, response, sizeof(response));
+                process_message(udp_buf, unix_udp_numbytes, UDP_HANDLE, response, sizeof(response), file_flag, fd);
 
                 // Send response back to UDP client
                 if (sendto(unix_udp_sockfd, response, strlen(response), 0,
@@ -581,4 +662,5 @@ int main(int argc, char*argv[])
         }   
 
     }
+    close(fd);
 }

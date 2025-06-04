@@ -422,6 +422,32 @@ int main(int argc, char*argv[])
 
             continue;
         }
+        
+        // Handle UDP socket
+        if (fds[i].fd == udp_sockfd && (fds[i].revents & POLLIN)) {
+
+            alarm(0); // RESET ALARM
+
+            char udp_buf[MAXDATASIZE];
+            struct sockaddr_storage udp_client_addr;
+            socklen_t udp_addr_len = sizeof udp_client_addr;
+            int udp_numbytes = recvfrom(udp_sockfd, udp_buf, sizeof(udp_buf) - 1, 0,
+                                        (struct sockaddr *)&udp_client_addr, &udp_addr_len);
+            if (udp_numbytes > 0) {
+                udp_buf[udp_numbytes] = '\0';
+
+                // Process the message
+                char response[256];
+                process_message(udp_buf, udp_numbytes, UDP_HANDLE, response, sizeof(response));
+
+                // Send response back to UDP client
+                if (sendto(udp_sockfd, response, strlen(response), 0,
+                        (struct sockaddr *)&udp_client_addr, udp_addr_len) == -1) {
+                    perror("sendto");
+                }
+            }
+            continue; // Done with UDP, continue to next fd
+        }
 
         // TCP listening socket, handles connection establishments
         if (fds[i].fd == tcp_sockfd && (fds[i].revents & POLLIN)) {
