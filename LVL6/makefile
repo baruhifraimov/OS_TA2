@@ -13,24 +13,6 @@ COVERAGE_DIR = ./coverage/
 
 all: atom_supplier.out drinks_bar.out molecule_requester.out
 
-drinks_bar.out: $(OBJ)drinks_bar.o $(OBJ)atom_warehouse_funcs.o
-	$(CXX) $(CXXFLAGS)   $^ -o $@
-
-atom_supplier.out: $(OBJ)atom_supplier.o $(OBJ)atom_supplier_funcs.o
-	$(CXX) $(CXXFLAGS)   $^ -o $@
-
-molecule_requester.out: $(OBJ)molecule_requester.o $(OBJ)atom_supplier_funcs.o
-	$(CXX) $(CXXFLAGS)   $^ -o $@
-
-# Convert all source files to object files
-$(OBJ)%.o: $(SRCFNC)%.c
-	mkdir -p obj
-	$(CXX) $(CXXFLAGS)   -c $< -o $@
-
-$(OBJ)%.o: $(SRC)%.c
-	mkdir -p obj
-	$(CXX) $(CXXFLAGS)   -c $< -o $@
-
 # GCOV BUILD ONLY
 coverage: coverage-build coverage-run coverage-report
 
@@ -85,7 +67,7 @@ $(OBJ)%.o: $(SRC)%.c
 
 
 clean:
-	rm -f *.o *.out *.txt
+	rm -f *.o *.out *.txt *.gcov
 	rm -r obj
 	clear
 

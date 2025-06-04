@@ -60,7 +60,7 @@ void ask_requester(unsigned int* amount, char* element, size_t element_size) {
     
     switch(index) {
         case 1: strncpy(element, "WATER", element_size-1); break;
-        case 2: strncpy(element, "CARBON DIOXIDE", element_size-1); break;
+        case 2: strncpy(element, "CARBONDIOXIDE", element_size-1); break;
         case 3: strncpy(element, "GLUCOSE", element_size-1); break;
         case 4: strncpy(element, "ALCOHOL", element_size-1); break;
         default: 

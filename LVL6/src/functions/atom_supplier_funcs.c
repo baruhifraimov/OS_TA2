@@ -13,7 +13,7 @@
 #include "../../include/functions/atom_supplier_funcs.h"
 #include "../../include/elements.h"
 
-void ask_supplier(unsigned int* amount, char* atom, size_t atom_size) {
+void ask_supplier(unsigned long long* amount, char* atom, size_t atom_size) {
     int index = 0;
     
     memset(atom, 0, atom_size);  // Safe clearing
@@ -25,7 +25,7 @@ void ask_supplier(unsigned int* amount, char* atom, size_t atom_size) {
     }
     
     printf("Enter your desired amount:\n");
-    if (scanf("%d", amount) != 1) {  // %llu for unsigned long long
+    if (scanf("%llu", amount) != 1) {  // %llu for unsigned long long
         fprintf(stderr, "Error: Invalid amount\n");
         return;
     }
@@ -41,7 +41,7 @@ void ask_supplier(unsigned int* amount, char* atom, size_t atom_size) {
     atom[atom_size-1] = '\0';  // Ensure null-termination
 }
 
-void ask_requester(unsigned int* amount, char* element, size_t element_size) {
+void ask_requester(unsigned long long* amount, char* element, size_t element_size) {
     int index = 0;
     
     memset(element, 0, element_size);  // Safe clearing
@@ -53,14 +53,14 @@ void ask_requester(unsigned int* amount, char* element, size_t element_size) {
     }
     
     printf("Enter your desired amount:\n");
-    if (scanf("%d", amount) != 1) {  // %llu for unsigned long long
+    if (scanf("%llu", amount) != 1) {  // %llu for unsigned long long
         fprintf(stderr, "Error: Invalid amount\n");
         return;
     }
-    
+
     switch(index) {
         case 1: strncpy(element, "WATER", element_size-1); break;
-        case 2: strncpy(element, "CARBON DIOXIDE", element_size-1); break;
+        case 2: strncpy(element, "CARBONDIOXIDE", element_size-1); break;
         case 3: strncpy(element, "GLUCOSE", element_size-1); break;
         case 4: strncpy(element, "ALCOHOL", element_size-1); break;
         default: 

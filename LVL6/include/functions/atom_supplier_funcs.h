@@ -20,7 +20,7 @@
  * @param atom The specified atom
  * @param atom_size The size of the string
  */
-void ask_supplier(unsigned int* amount, char* atom, size_t atom_size);
+void ask_supplier(unsigned long long* amount, char* atom, size_t atom_size);
 
 /**
  * @brief Prompts user to select atom type and quantity, 
@@ -30,7 +30,7 @@ void ask_supplier(unsigned int* amount, char* atom, size_t atom_size);
  * @param atom The specified atom
  * @param atom_size The size of the string
  */
-void ask_requester(unsigned int* amount, char* atom, size_t atom_size);
+void ask_requester(unsigned long long* amount, char* atom, size_t atom_size);
 
 /**
  * Helper function to handle both IPv4 and IPv6 addresses.

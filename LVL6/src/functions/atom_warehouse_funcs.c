@@ -22,6 +22,7 @@ int alarm_timeout = 0;
 // Global warehouse instance
 AtomStorage warehouse = {0};
 
+
 void save_to_file(int fd){
 
     // LOCK THE FILE, IF ERROR, END PROCCESS
@@ -180,6 +181,7 @@ void process_message(char* buf, size_t size_buf, u_int8_t sock_handle, char *res
         }
         // check if its DELIVER and UDP
         else if(!strcmp(cmd,"DELIVER") && sock_handle == UDP_HANDLE){
+            
             switch(element){
                 case WATER:
                 if(warehouse.hydrogen>=2*amount && warehouse.oxygen >=1*amount){
@@ -250,6 +252,7 @@ void process_message(char* buf, size_t size_buf, u_int8_t sock_handle, char *res
             strcat(element_str, element_str2);
         }
         element = element_type_from_str(element_str);
+        
         if(sock_handle == KEYBOARD_HANDLE){
             unsigned long long min = INT_MAX ;
             unsigned long long temp_water = get_water_num(warehouse.oxygen,warehouse.hydrogen);

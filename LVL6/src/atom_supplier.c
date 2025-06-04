@@ -54,7 +54,7 @@ int main(int argc, char *argv[])
 
 
     // check then option you got from the user:
-    int ret = getopt(argc, argv, "p:h:f:");
+    int ret = getopt(argc, argv, ":p:h:f:");
     char *endptr; // for checking if the value is digit
     long val = 0;
 
@@ -105,11 +105,14 @@ int main(int argc, char *argv[])
                 break;
             }
         }
-        ret = getopt(argc, argv, "p:h:f:");
+        ret = getopt(argc, argv, ":p:h:f:");
     }
 
     if((flag_p !=1 && flag_h ==1) || (flag_h != 1 && flag_p ==1)){
-        fprintf(stderr, "ERROR: -h should come with -p, vice versa -%c\n", ret);
+        fprintf(stderr, "ERROR: -h should come with -p, vice versa \n");
+        exit(1);
+    }else if(flag_p == 0 && flag_f == 0 && flag_h == 0){
+        fprintf(stderr, "ERROR: no valid input \n");
         exit(1);
     }
 
@@ -188,13 +191,13 @@ int main(int argc, char *argv[])
         }
     }
         // GET USER INPUT
-        unsigned int amount;
+        unsigned long long amount;
         char atom[10];
         ask_supplier(&amount, atom, sizeof(atom));
 
         // Format the message to send to server: ADD {atom} {amount}
         char send_buf[MAXDATASIZE];
-        snprintf(send_buf, MAXDATASIZE, "ADD %s %u", atom, amount);
+        snprintf(send_buf, MAXDATASIZE, "ADD %s %llu", atom, amount);
 
     
 

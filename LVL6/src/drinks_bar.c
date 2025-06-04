@@ -86,7 +86,7 @@ int main(int argc, char*argv[])
     };
 
     // check then option you got from the user:
-    int ret = getopt_long(argc, argv, "U:T:d:s:o:c:h:t:f:", longopts, NULL);
+    int ret = getopt_long(argc, argv, ":U:T:d:s:o:c:h:t:f:", longopts, NULL);
     char *endptr; // for checking if the value is digit
     long val = 0;
 
@@ -200,7 +200,7 @@ int main(int argc, char*argv[])
                 fprintf(stderr,"ERROR: usage: ./drinks_bar.out -T/--tcp-port <int> -U/--udp-port <int> (OPTIONAL: -o/--oxygen <int=0> -c/--carbon <int=0> -h/--hydrogen <int=0> -t/--timeout <int=0>\n");
                 exit(1);
         }
-        ret = getopt_long(argc, argv, "U:T:d:s:o:c:h:t:f:", longopts, NULL);
+        ret = getopt_long(argc, argv, ":U:T:d:s:o:c:h:t:f:", longopts, NULL);
     }
 
     // if file flag is on, chec if file exists
@@ -418,24 +418,34 @@ int main(int argc, char*argv[])
     }
     
     // Array of pollfd structures to track file descriptors
-    struct pollfd fds[BACKLOG + 1];  // +1 for the listening socket
+    struct pollfd fds[MAX_CLIENTS + 5];  // +1 for the listening socket
+
+    int nfds = 0;
 
     // Initialize the first pollfd to watch for incoming connections on the listener socket
     fds[0].fd = tcp_sockfd;
     fds[0].events = POLLIN;  // Watch for incoming data
+    nfds++;
+
     fds[1].fd = udp_sockfd;
     fds[1].events = POLLIN;
+    nfds++;
+
     fds[2].fd = STDIN_FILENO;
     fds[2].events = POLLIN;
+    nfds++;
+
     if(UNIX_UDP_SOCKET_PATH != NULL){
     fds[3].fd = unix_udp_sockfd;
     fds[3].events = POLLIN;
+    nfds++;
     }
     if(UNIX_TCP_SOCKET_PATH != NULL){
     fds[4].fd = unix_tcp_sockfd;
     fds[4].events = POLLIN;
+    nfds++;
     }
-    int nfds = 5;  // Number of file descriptors to monitor the first TCP and UDP
+    
 
 
     printf("server: waiting for connections...\n");
@@ -443,7 +453,6 @@ int main(int argc, char*argv[])
     signal(SIGALRM,alarm_handler);
 
     // STEP 6: Main server loop - accept and handle client connections
-    // TODO: NEED TO CHANGE TO IO MUX INSTEAD OF FORK PER CLIENT
     while(1) {
 
             // START alarm // TODO CHANGE THE INT TO USER INPUT INT
@@ -494,14 +503,14 @@ int main(int argc, char*argv[])
 
                     // chec if no error occured
                     if(fgets(server_input,sizeof(server_input),stdin) != NULL){
-                        process_message(server_input, strlen(server_input)+1, KEYBOARD_HANDLE, response, sizeof(response), file_flag, fd);
+                        process_message(server_input,strlen(server_input)+1,KEYBOARD_HANDLE,response,sizeof(response), file_flag, fd);
                         printf("%s\n", response);
 
                     }
 
             continue;
         }
-
+        
         // Handle UDP socket
         if (fds[i].fd == udp_sockfd && (fds[i].revents & POLLIN)) {
 
@@ -559,7 +568,7 @@ int main(int argc, char*argv[])
             }
         }
 
-        // UNIX TCP listening socket, handles connection establishments
+                // UNIX TCP listening socket, handles connection establishments
         if (fds[i].fd == unix_tcp_sockfd && (fds[i].revents & POLLIN)) {
 
             alarm(0); // RESET ALARM
@@ -589,48 +598,48 @@ int main(int argc, char*argv[])
         }
 
         // Handle data from existing TCP client
-        if ((fds[i].revents & POLLIN)&& fds[i].fd != unix_tcp_sockfd && fds[i].fd != udp_sockfd && fds[i].fd != unix_udp_sockfd && fds[i].fd != STDIN_FILENO) {
+        else if ((fds[i].revents & POLLIN)&& fds[i].fd != unix_tcp_sockfd && fds[i].fd != udp_sockfd && fds[i].fd != unix_udp_sockfd && fds[i].fd != STDIN_FILENO) {
 
-            alarm(0); // RESET ALARM
+        alarm(0); // RESET ALARM
 
-            // This is a client socket with data to read
-            char buf[MAXDATASIZE];
-            int numbytes;
+        // This is a client socket with data to read
+        char buf[MAXDATASIZE];
+        int numbytes;
 
-            // Receive data
-            numbytes = recv(fds[i].fd, buf, sizeof(buf) - 1, 0);
+        // Receive data
+        numbytes = recv(fds[i].fd, buf, sizeof(buf) - 1, 0);
 
-            if (numbytes < 1) {
-                // Error or connection closed
-                if (numbytes == 0) {
-                    // Connection closed normally
-                    // printf("server: socket %d hung up\n", fds[i].fd);
-                } else {
-                    perror("recv");
-                }
-                
-                // Remove this fd from the array (by replacing him with the last fd)
-                // Only remove if this is NOT the listening socket or UDP socket
-                if (fds[i].fd != tcp_sockfd && fds[i].fd != udp_sockfd) {
-                    close(fds[i].fd);
-                    fds[i] = fds[nfds - 1];
-                    nfds--;
-                    i--;
-                }
+        if (numbytes < 1) {
+            // Error or connection closed
+            if (numbytes == 0) {
+                // Connection closed normally
+                // printf("server: socket %d hung up\n", fds[i].fd);
             } else {
-                // We have data from a client
-                buf[numbytes] = '\0';
-                // printf("server: received '%s' on socket %d\n", buf, fds[i].fd);
-                
-                // Process the message
-                char response[256];
-                process_message(buf, numbytes, TCP_HANDLE,response, sizeof(response), file_flag, fd);
-                
-                // send message to client
-                if (send(fds[i].fd, response, strlen(response), 0) == -1) {
-                    perror("send");
-                    }
-                }
+                perror("recv");
+            }
+            
+            // Remove this fd from the array (by replacing him with the last fd)
+            // Only remove if this is NOT the listening socket or UDP socket
+            if (fds[i].fd != tcp_sockfd && fds[i].fd != udp_sockfd) {
+                close(fds[i].fd);
+                fds[i] = fds[nfds - 1];
+                nfds--;
+                i--;
+            }
+        } else {
+            // We have data from a client
+            buf[numbytes] = '\0';
+            // printf("server: received '%s' on socket %d\n", buf, fds[i].fd);
+            
+            // Process the message
+            char response[256];
+            process_message(buf, numbytes, TCP_HANDLE,response, sizeof(response), file_flag, fd);
+            
+            // send message to client
+            if (send(fds[i].fd, response, strlen(response), 0) == -1) {
+                perror("send");
+                 }
+            }
         }       
 
         // Handle UNIX UDP socket
