@@ -278,7 +278,7 @@ void process_message(char* buf, size_t size_buf, u_int8_t sock_handle, char *res
                         min = temp_water;
                     }
                     else if(min > temp_glucose){
-                        min = temp_carbonDio;
+                        min = temp_glucose;
                     }
                     else if(min > temp_alcohol){
                         min = temp_alcohol;
