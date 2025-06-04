@@ -224,12 +224,10 @@ int main(int argc, char *argv[])
 
         // Print the message received from the server
         printf("client: received '%s'\n", buf);
-
+        close(sockfd);
         if (flag_f) {
             unlink(addr.sun_path);  // Remove client socket file only
         }
 
-        // Clean up by closing the socket
-        close(sockfd);
         return 0;
     } 

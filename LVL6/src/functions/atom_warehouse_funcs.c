@@ -26,7 +26,7 @@ void save_to_file(int fd){
 
     // LOCK THE FILE, IF ERROR, END PROCCESS
     if (flock(fd, LOCK_EX) == -1){
-        perror("flock");
+        perror("function flock");
         close(fd);
         exit(1);
     }
@@ -53,7 +53,7 @@ void reload_from_file(int fd){
 
     // LOCK THE FILE, IF ERROR, END PROCCESS
     if (flock(fd, LOCK_EX) == -1){
-        perror("flock");
+        perror("function flock");
         close(fd);
         exit(1);
     }
@@ -136,9 +136,11 @@ void format_storage(char *out, size_t out_size) {
 
 
 void process_message(char* buf, size_t size_buf, u_int8_t sock_handle, char *response, size_t response_size, int file_flag, int fd){
-    reload_from_file(fd);
+    if(file_flag){
+        reload_from_file(fd);
+        }
     // Parse the command
-    char cmd[10], element_str[20];
+    char cmd[10] = {0}, element_str[20] = {0}, element_str2[20] = {0};
     Element element;
     int amount;
 
@@ -149,7 +151,7 @@ void process_message(char* buf, size_t size_buf, u_int8_t sock_handle, char *res
     }
 
     // if  we got exactly three elements, continue
-    if (sscanf(buf, "%s %s %d",cmd,element_str,&amount) == 3 || (sscanf(buf, "%s %s",cmd,element_str) && strcmp(cmd,"GEN") == 0)){
+    if (sscanf(buf, "%s %s %d",cmd,element_str,&amount) == 3){
         element = element_type_from_str(element_str);
         // check if its ADD and TCP
         if(!strcmp(cmd,"ADD") && sock_handle == TCP_HANDLE){
@@ -169,7 +171,9 @@ void process_message(char* buf, size_t size_buf, u_int8_t sock_handle, char *res
                         "ERROR: Unkown atom type\n");
                     return;
             }
+            if(file_flag){
             save_to_file(fd);
+            }
             format_storage(response, response_size);
             // Print the storage to server console
             print_storage();
@@ -233,12 +237,20 @@ void process_message(char* buf, size_t size_buf, u_int8_t sock_handle, char *res
                         "ERROR: Unkown mulecule type\n");
                     return;
                     }
-                save_to_file(fd);
+                    if(file_flag){
+                        save_to_file(fd);
+                    }
                 printf("\n-- UPDATE --\n");
                 print_storage();
             }
-        
-        else if(!strcmp(cmd,"GEN") && sock_handle == KEYBOARD_HANDLE){
+    }else if(sscanf(buf, "%s %s %s",cmd,element_str, element_str2) && strcmp(cmd,"GEN") == 0){
+        // cjeck if we got anther word
+        if(strlen(element_str2) > 1){
+            strcat(element_str, " ");
+            strcat(element_str, element_str2);
+        }
+        element = element_type_from_str(element_str);
+        if(sock_handle == KEYBOARD_HANDLE){
             unsigned long long min = INT_MAX ;
             unsigned long long temp_water = get_water_num(warehouse.oxygen,warehouse.hydrogen);
             unsigned long long temp_alcohol = get_alcohol_num(warehouse.carbon,warehouse.oxygen,warehouse.hydrogen);
@@ -295,19 +307,13 @@ void process_message(char* buf, size_t size_buf, u_int8_t sock_handle, char *res
             print_storage();    // Print the storage to server console
             }
 
-        }else {                // no ADD no DELIVER? unkown
+        }
+    }else {                // no ADD no DELIVER? unkown
             fprintf(stdout,"ERROR: Unkown command\n");
             snprintf(response, response_size, 
                 "ERROR: Unknown command\n");
         }
-    }else {                  // Not in the requested format
-
-        fprintf(stdout,"ERROR: invalid format\n");
-        snprintf(response, response_size, 
-            "ERROR: invalid format\n");
-        return;
     }
-}
 
 void sigchld_handler(int s)
 {

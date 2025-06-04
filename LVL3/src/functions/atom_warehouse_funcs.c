@@ -76,7 +76,7 @@ void format_storage(char *out, size_t out_size) {
 
 void process_message(char* buf, size_t size_buf, u_int8_t sock_handle, char *response, size_t response_size){
     // Parse the command
-    char cmd[10], element_str[20];
+    char cmd[10] = {0}, element_str[20] = {0}, element_str2[20] = {0};
     Element element;
     int amount;
 
@@ -174,7 +174,14 @@ void process_message(char* buf, size_t size_buf, u_int8_t sock_handle, char *res
                 print_storage();
             }
         
-        else if(!strcmp(cmd,"GEN") && sock_handle == KEYBOARD_HANDLE){
+        else if(sscanf(buf, "%s %s %s",cmd,element_str, element_str2) && strcmp(cmd,"GEN") == 0){
+            // cjeck if we got anther word
+                if(strlen(element_str2) > 1){
+                    strcat(element_str, " ");
+                    strcat(element_str, element_str2);
+                }
+            element = element_type_from_str(element_str);
+
             unsigned long long min = INT_MAX ;
             unsigned long long temp_water = get_water_num(oxygen,hydrogen);
             unsigned long long temp_alcohol = get_alcohol_num(carbon,oxygen,hydrogen);

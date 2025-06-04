@@ -32,7 +32,7 @@ void format_storage(char *out, size_t out_size) {
 
 void process_message(char* buf, size_t size_buf, u_int8_t sock_handle, char *response, size_t response_size){
     // Parse the command
-    char cmd[10], element_str[20];
+    char cmd[10] = {0}, element_str[20] = {0};
     Element element;
     int amount;
 

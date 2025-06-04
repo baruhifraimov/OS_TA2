@@ -219,14 +219,14 @@ int main(int argc, char*argv[])
 
             // FILE EXISTS BUT NO INPUT
             if( reader < 0){
-                perror("read");
+                perror("server read");
                 close(fd);
                 exit(1);
             }
 
             // IF NO STRUCT SIZE, WRONG FORMAT, ERROR
             if (reader != sizeof(AtomStorage)) {
-                perror("read");
+                perror("server read");
                 close(fd);
                 return 0;
             }
@@ -242,14 +242,14 @@ int main(int argc, char*argv[])
 
             // LOCK THE FILE, IF ERROR, END PROCCESS
             if (flock(fd, LOCK_EX) == -1){
-                perror("flock");
+                perror("server flock");
                 close(fd);
                 exit(1);
             }
 
             // CHECK FOR WRITE ISSUES
             if(write(fd, &warehouse, sizeof(AtomStorage)) == -1){
-                perror("write");
+                perror("server write");
                 close(fd);
                 exit(1);
             }
