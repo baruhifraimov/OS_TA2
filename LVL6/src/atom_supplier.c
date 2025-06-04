@@ -218,7 +218,6 @@ int main(int argc, char *argv[])
         }
 
         // Null-terminate the received data to make it a valid string
-        buf[numbytes] = '\0';
     } else if(flag_f){
         if (write(sockfd, send_buf, strlen(send_buf)) == -1) {
             perror("write");
@@ -228,13 +227,16 @@ int main(int argc, char *argv[])
 
         printf("client: sent request --> '%s'\n", send_buf);
 
+        // Signal EOF to the server (no more data will be sent)
+        shutdown(sockfd, SHUT_WR);
+
         // Receive data from the server
         if ((numbytes = read(sockfd, buf, MAXDATASIZE-1)) == -1) {
             perror("read");
             exit(1);
         }
     }
-
+    buf[numbytes] = '\0';
     // Print the message received from the server
     printf("client: received '%s'\n", buf);
 

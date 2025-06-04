@@ -509,54 +509,61 @@ int main(int argc, char*argv[])
             }
         }
 
-        // Handle data from existing TCP client
-        else if ((fds[i].revents & POLLIN)&& fds[i].fd != unix_tcp_sockfd && fds[i].fd != udp_sockfd && fds[i].fd != unix_udp_sockfd && fds[i].fd != STDIN_FILENO) {
+        // Handle data from existing TCP or UNIX TCP client
+        else if ((fds[i].revents & POLLIN)
+            && fds[i].fd != tcp_sockfd
+            && fds[i].fd != unix_tcp_sockfd
+            && fds[i].fd != udp_sockfd
+            && fds[i].fd != unix_udp_sockfd
+            && fds[i].fd != STDIN_FILENO) {
 
-        alarm(0); // RESET ALARM
+            alarm(0); // RESET ALARM
 
-        // This is a client socket with data to read
-        char buf[MAXDATASIZE];
-        int numbytes;
+            // This is a client socket with data to read
+            char buf[MAXDATASIZE];
+            int numbytes;
 
-        // Receive data
-        numbytes = recv(fds[i].fd, buf, sizeof(buf) - 1, 0);
+            // Receive data
+            numbytes = recv(fds[i].fd, buf, sizeof(buf) - 1, 0);
 
-        if (numbytes < 1) {
-            // Error or connection closed
-            if (numbytes == 0) {
-                // Connection closed normally
-                // printf("server: socket %d hung up\n", fds[i].fd);
+            if (numbytes < 1) {
+                // Error or connection closed
+                if (numbytes == 0) {
+                    // Connection closed normally
+                    // printf("server: socket %d hung up\n", fds[i].fd);
+                } else {
+                    perror("recv");
+                }
+                
+                // Remove this fd from the array (by replacing him with the last fd)
+                // Only remove if this is NOT the listening socket or UDP socket
+                if (fds[i].fd != tcp_sockfd && fds[i].fd != udp_sockfd && fds[i].fd != unix_tcp_sockfd && fds[i].fd != unix_udp_sockfd) {
+                    close(fds[i].fd);
+                    fds[i] = fds[nfds - 1];
+                    nfds--;
+                    i--;
+                }
             } else {
-                perror("recv");
+                // We have data from a client
+                buf[numbytes] = '\0';
+                // Print debug for UNIX TCP
+                // printf("server: received '%s' on socket %d\n", buf, fds[i].fd);
+
+                // Process the message
+                char response[256];
+                // Use TCP_HANDLE for both AF_INET and AF_UNIX stream sockets
+                process_message(buf, numbytes, TCP_HANDLE, response, sizeof(response));
+
+                // send message to client
+                if (send(fds[i].fd, response, strlen(response), 0) == -1) {
+                    perror("send");
+                }
             }
-            
-            // Remove this fd from the array (by replacing him with the last fd)
-            // Only remove if this is NOT the listening socket or UDP socket
-            if (fds[i].fd != tcp_sockfd && fds[i].fd != udp_sockfd) {
-                close(fds[i].fd);
-                fds[i] = fds[nfds - 1];
-                nfds--;
-                i--;
-            }
-        } else {
-            // We have data from a client
-            buf[numbytes] = '\0';
-            // printf("server: received '%s' on socket %d\n", buf, fds[i].fd);
-            
-            // Process the message
-            char response[256];
-            process_message(buf, numbytes, TCP_HANDLE,response, sizeof(response));
-            
-            // send message to client
-            if (send(fds[i].fd, response, strlen(response), 0) == -1) {
-                perror("send");
-                 }
-            }
-        }       
+        }
 
         // Handle UNIX UDP socket
         if (fds[i].fd == unix_udp_sockfd && (fds[i].revents & POLLIN)) {
-
+            printf("\nUNIX UDP POLL?\n");
             alarm(0); // RESET ALARM
 
             char udp_buf[MAXDATASIZE];
@@ -567,18 +574,24 @@ int main(int argc, char*argv[])
             if (unix_udp_numbytes > 0) {
                 udp_buf[unix_udp_numbytes] = '\0';
 
+                // Debug: print what was received and from where
+                printf("UNIX DGRAM: received '%s' from client path '%s'\n", udp_buf, unix_udp_client_addr.sun_path);
+
                 // Process the message
                 char response[256];
                 process_message(udp_buf, unix_udp_numbytes, UDP_HANDLE, response, sizeof(response));
+
+                // Debug: print what will be sent
+                printf("UNIX DGRAM: sending response '%s' to client path '%s'\n", response, unix_udp_client_addr.sun_path);
 
                 // Send response back to UDP client
                 if (sendto(unix_udp_sockfd, response, strlen(response), 0,
                         (struct sockaddr *)&unix_udp_client_addr, unix_udp_addr_len) == -1) {
                     perror("sendto");
-                    }
                 }
-            continue; // Done with UNIX_UDP, continue to next fd
             }
+            continue; // Done with UNIX_UDP, continue to next fd
+        }
         // END OF ALARM
         }   
 
