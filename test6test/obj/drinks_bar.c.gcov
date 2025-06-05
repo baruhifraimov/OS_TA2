@@ -1,0 +1,990 @@
+        -:    0:Source:src/drinks_bar.c
+        -:    1:/**
+        -:    2: * @file atom_warehouse.c
+        -:    3: * @brief Server side - Atom warehouse management system
+        -:    4: * This server accepts commands to add atoms (CARBON, OXYGEN, HYDROGEN) and tracks their counts.
+        -:    5: * Uses IO multiplexing to handle multiple clients in parallel via forking.
+        -:    6: * 
+        -:    7: * The commands (messages) that will be accepted from client side in unsigned_int:
+        -:    8: * 	ADD CAROB <#>
+        -:    9: * 	ADD OXYGEN <#>
+        -:   10: * 	ADD HYDROGEN <#>
+        -:   11: * 
+        -:   12: * After each command print to stdout the current num of atoms for each type
+        -:   13: * 
+        -:   14: * For an invalid command, print ERROR
+        -:   15: * 
+        -:   16: * https://beej.us/guide/bgnet/html/split-wide/client-server-background.html#a-simple-stream-server
+        -:   17: * @date 2025-05-31
+        -:   18: * 
+        -:   19: */
+        -:   20:
+        -:   21:#define _POSIX_C_SOURCE 200112L
+        -:   22:
+        -:   23:#include <stdio.h>
+        -:   24:#include <stdlib.h>
+        -:   25:#include <unistd.h>
+        -:   26:#include <errno.h>
+        -:   27:#include <string.h>
+        -:   28:#include <sys/types.h>
+        -:   29:#include <sys/socket.h>
+        -:   30:#include <netinet/in.h>
+        -:   31:#include <netdb.h>
+        -:   32:#include <arpa/inet.h>
+        -:   33:#include <sys/wait.h>
+        -:   34:#include <signal.h>
+        -:   35:#include <ctype.h>
+        -:   36:#include "../include/const.h"
+        -:   37:#include "../include/atom_warehouse_funcs.h"
+        -:   38:#include <poll.h>
+        -:   39:#include <unistd.h>
+        -:   40:#include <getopt.h>
+        -:   41:#include <sys/un.h>
+        -:   42:#include <fcntl.h>   // open
+        -:   43:#include <sys/stat.h>  // level of access to files
+        -:   44:#include <sys/file.h>  // flock
+        -:   45:#include <limits.h>
+        -:   46:#include "../include/elements.h"
+        -:   47:
+    #####:   48:Element element_type_from_str(const char *str) {
+    #####:   49:    if (strcmp(str, "CARBON") == 0) return CARBON;
+    #####:   50:    if (strcmp(str, "OXYGEN") == 0) return OXYGEN;
+    #####:   51:    if (strcmp(str, "HYDROGEN") == 0) return HYDROGEN;
+    #####:   52:    if (strcmp(str, "WATER") == 0) return WATER;
+    #####:   53:    if (strcmp(str, "CARBONDIOXIDE") == 0) return CARBON_DIOXIDE;
+    #####:   54:    if (strcmp(str, "GLUCOSE") == 0) return GLUCOSE;
+    #####:   55:    if (strcmp(str, "ALCOHOL") == 0) return ALCOHOL;
+    #####:   56:    if (strcmp(str, "SOFT DRINK") == 0) return SOFT_DRINK;
+    #####:   57:    if (strcmp(str, "VODKA") == 0) return VODKA;
+    #####:   58:    if (strcmp(str, "CHAMPAGNE") == 0) return CHAMPAGNE;
+    #####:   59:    return UNKNOWN;
+        -:   60:}
+        -:   61:
+        -:   62:// Global warehouse instance
+        -:   63:AtomStorage warehouse = {0};
+        -:   64:int alarm_timeout = 0;
+        -:   65:
+    #####:   66:void save_to_file(int fd){
+        -:   67:
+        -:   68:    // LOCK THE FILE, IF ERROR, END PROCCESS
+    #####:   69:    if (flock(fd, LOCK_EX) == -1){
+    #####:   70:        perror("function flock");
+    #####:   71:        close(fd);
+    #####:   72:        exit(1);
+        -:   73:    }
+        -:   74:
+        -:   75:    // Seek to beginning of file
+    #####:   76:    if (lseek(fd, 0, SEEK_SET) == -1) {
+    #####:   77:        perror("lseek");
+    #####:   78:        close(fd);
+    #####:   79:        exit(1);
+        -:   80:    }
+        -:   81:
+        -:   82:    // check if write failed
+    #####:   83:    if(write(fd, &warehouse, sizeof(AtomStorage)) == -1){
+    #####:   84:        perror("writre failed");
+    #####:   85:        close(fd);
+    #####:   86:        exit(1);
+        -:   87:    }
+        -:   88:
+        -:   89:    // UNLOCK THE LOCK
+    #####:   90:    flock(fd, LOCK_UN);
+    #####:   91:}
+        -:   92:
+    #####:   93:void reload_from_file(int fd){
+        -:   94:
+        -:   95:    // LOCK THE FILE, IF ERROR, END PROCCESS
+    #####:   96:    if (flock(fd, LOCK_EX) == -1){
+    #####:   97:        perror("function flock");
+    #####:   98:        close(fd);
+    #####:   99:        exit(1);
+        -:  100:    }
+        -:  101:
+        -:  102:    // Seek to beginning of file
+    #####:  103:    if (lseek(fd, 0, SEEK_SET) == -1) {
+    #####:  104:        perror("lseek");
+    #####:  105:        close(fd);
+    #####:  106:        exit(1);
+        -:  107:    }
+        -:  108:
+        -:  109:    // check if write failed
+    #####:  110:    if(read(fd, &warehouse, sizeof(AtomStorage)) == -1){
+    #####:  111:        perror("read failed");
+    #####:  112:        close(fd);
+    #####:  113:        exit(1);
+        -:  114:    }
+        -:  115:
+        -:  116:    // UNLOCK THE LOCK
+    #####:  117:    flock(fd, LOCK_UN);
+    #####:  118:}
+        -:  119:
+    #####:  120:void init_warehouse(unsigned long long c, unsigned long long o, unsigned long long h) {
+    #####:  121:    warehouse.carbon = c;
+    #####:  122:    warehouse.oxygen = o;
+    #####:  123:    warehouse.hydrogen = h;
+    #####:  124:}
+        -:  125:
+    #####:  126:unsigned long long get_water_num(unsigned long long oxygen, unsigned long long hydrogen){
+    #####:  127:    unsigned long long counter = 0;
+    #####:  128:    while(oxygen > 1 && hydrogen > 2){
+    #####:  129:        oxygen -= 1;
+    #####:  130:        hydrogen -= 2;
+    #####:  131:        counter++;
+        -:  132:    }
+    #####:  133:    return counter;
+        -:  134:}
+        -:  135:
+    #####:  136:unsigned long long get_carbonDio_num(unsigned long long carbon, unsigned long long oxygen){
+    #####:  137:    unsigned long long counter = 0;
+    #####:  138:    while(carbon > 1 && oxygen > 2){
+    #####:  139:        carbon -= 1;
+    #####:  140:        oxygen -= 2;
+    #####:  141:        counter++;
+        -:  142:    }
+    #####:  143:    return counter;
+        -:  144:}
+        -:  145:
+    #####:  146:unsigned long long get_alcohol_num(unsigned long long carbon, unsigned long long oxygen, unsigned long long hydrogen){
+    #####:  147:    unsigned long long counter = 0;
+    #####:  148:    while(carbon > 2 && oxygen > 1 && hydrogen > 6){
+    #####:  149:        carbon -= 2;
+    #####:  150:        hydrogen -=6;
+    #####:  151:        oxygen -=1;
+    #####:  152:        counter++;
+        -:  153:    }
+    #####:  154:    return counter;
+        -:  155:}
+        -:  156:
+    #####:  157:unsigned long long get_glucose_num(unsigned long long carbon, unsigned long long oxygen, unsigned long long hydrogen){
+    #####:  158:    unsigned long long counter = 0;
+    #####:  159:    while(carbon > 6 && oxygen > 6 && hydrogen > 12){
+    #####:  160:        carbon -= 6;
+    #####:  161:        hydrogen -= 12;
+    #####:  162:        oxygen -= 6;
+    #####:  163:        counter++;
+        -:  164:    }
+    #####:  165:    return counter;
+        -:  166:}
+        -:  167:
+        -:  168:
+    #####:  169:void print_storage(){
+    #####:  170:    printf("\nCARBON #:%lld \nOXYGEN #:%lld \nHYDROGEN #:%lld\n",warehouse.carbon, warehouse.oxygen, warehouse.hydrogen);
+    #####:  171:    return;
+        -:  172:}
+        -:  173:
+    #####:  174:void format_storage(char *out, size_t out_size) {
+    #####:  175:    snprintf(out, out_size, "CARBON: %lld\nOXYGEN: %lld\nHYDROGEN: %lld\n", warehouse.carbon, warehouse.oxygen, warehouse.hydrogen);
+    #####:  176:}
+        -:  177:
+        -:  178:
+    #####:  179:void process_message(char* buf, size_t size_buf, u_int8_t sock_handle, char *response, size_t response_size, int file_flag, int fd){
+    #####:  180:    if(file_flag){
+    #####:  181:        reload_from_file(fd);
+        -:  182:        }
+        -:  183:    // Early validation for ADD missing arguments
+    #####:  184:    char cmdTemp[10] = {0}, elemTemp[20] = {0}, extraTemp[20] = {0};
+    #####:  185:    int tokenCount = sscanf(buf, "%9s %19s %19s", cmdTemp, elemTemp, extraTemp);
+    #####:  186:    if (strcmp(cmdTemp, "ADD") == 0 && tokenCount < 3) {
+    #####:  187:        fprintf(stdout, "ERROR: Invalid ADD command format\n");
+    #####:  188:        snprintf(response, response_size, "ERROR: Invalid ADD command format\n");
+    #####:  189:        return;
+        -:  190:    }
+        -:  191:
+        -:  192:    // Parse the command
+    #####:  193:    char cmd[10] = {0}, element_str[20] = {0}, element_str2[20] = {0};
+        -:  194:    Element element;
+        -:  195:    int amount;
+        -:  196:
+        -:  197:    // if  we got exactly three elements, continue
+    #####:  198:    if (sscanf(buf, "%s %s %d",cmd,element_str,&amount) == 3){
+    #####:  199:        element = element_type_from_str(element_str);
+        -:  200:        // check if its ADD and TCP
+    #####:  201:        if(!strcmp(cmd,"ADD") && sock_handle == TCP_HANDLE){
+    #####:  202:            switch(element){
+    #####:  203:                case 0:
+    #####:  204:                warehouse.carbon += amount;
+    #####:  205:                    break;
+    #####:  206:                case 1:
+    #####:  207:                warehouse.oxygen += amount;
+    #####:  208:                    break;
+    #####:  209:                case 2:
+    #####:  210:                warehouse.hydrogen += amount;
+    #####:  211:                    break;
+    #####:  212:                default:
+    #####:  213:                    fprintf(stdout,"ERROR: Unkown atom type\n");
+    #####:  214:                    snprintf(response, response_size, 
+        -:  215:                        "ERROR: Unkown atom type\n");
+    #####:  216:                    return;
+        -:  217:            }
+    #####:  218:            if(file_flag){
+    #####:  219:            save_to_file(fd);
+        -:  220:            }
+    #####:  221:            format_storage(response, response_size);
+        -:  222:            // Print the storage to server console
+    #####:  223:            print_storage();
+        -:  224:        }
+        -:  225:        // check if its DELIVER and UDP
+    #####:  226:        else if(!strcmp(cmd,"DELIVER") && sock_handle == UDP_HANDLE){
+        -:  227:            
+    #####:  228:            switch(element){
+    #####:  229:                case WATER:
+    #####:  230:                if(warehouse.hydrogen>=2*amount && warehouse.oxygen >=1*amount){
+    #####:  231:                    warehouse.hydrogen -= 2*amount;
+    #####:  232:                    warehouse.oxygen -= 1*amount;
+    #####:  233:                    snprintf(response, response_size, 
+        -:  234:                        "#%d WATER DELIVERED",amount);
+        -:  235:                }else{
+    #####:  236:                    fprintf(stderr,"Not enough atoms to make WATER");
+    #####:  237:                    snprintf(response, response_size, 
+        -:  238:                        "ERROR: Not enough atoms to make WATER\n");
+        -:  239:                }
+    #####:  240:                    break;
+    #####:  241:                case CARBON_DIOXIDE:
+    #####:  242:                if(warehouse.carbon >=1*amount && warehouse.oxygen>=2*amount){
+    #####:  243:                    warehouse.carbon -= 1*amount;
+    #####:  244:                    warehouse.oxygen -= 2*amount;
+    #####:  245:                    snprintf(response, response_size, 
+        -:  246:                        "#%d CARBON DIOXIDE DELIVERED",amount);
+        -:  247:                }else{
+    #####:  248:                    fprintf(stderr,"Not enough atoms to make CARBON DIOXIDE");
+    #####:  249:                    snprintf(response, response_size, 
+        -:  250:                        "ERROR: Not enough atoms to make CARBON DIOXIDE\n");
+        -:  251:                }
+    #####:  252:                    break;
+    #####:  253:                case GLUCOSE:
+    #####:  254:                if(warehouse.carbon >= 6*amount && warehouse.hydrogen >= 12*amount && warehouse.oxygen >= 6*amount){
+    #####:  255:                    warehouse.carbon -= 6*amount;
+    #####:  256:                    warehouse.hydrogen -= 12*amount;
+    #####:  257:                    warehouse.oxygen -= 6*amount;
+    #####:  258:                    snprintf(response, response_size, 
+        -:  259:                        "#%d GLUCOSE DELIVERED", amount);
+        -:  260:                } else{
+    #####:  261:                    fprintf(stderr,"Not enough atoms to make GLUCOSE");
+    #####:  262:                    snprintf(response, response_size, 
+        -:  263:                        "ERROR: Not enough atoms to make GLUCOSE\n");
+        -:  264:                }
+    #####:  265:                    break;
+    #####:  266:                case ALCOHOL:
+    #####:  267:                if(warehouse.carbon >= 2*amount && warehouse.hydrogen >= 6*amount && warehouse.oxygen >= 1*amount){
+    #####:  268:                    warehouse.carbon -= 2*amount;
+    #####:  269:                    warehouse.hydrogen -=6*amount;
+    #####:  270:                    warehouse.oxygen -=1*amount;
+    #####:  271:                    snprintf(response, response_size, 
+        -:  272:                        "#%d ALCOHOL DELIVERED",amount);
+        -:  273:                } else{
+    #####:  274:                    fprintf(stderr,"Not enough atoms to make ALCOHOL");
+    #####:  275:                    snprintf(response, response_size, 
+        -:  276:                        "ERROR: Not enough atoms to make ALCOHOL\n");
+        -:  277:                }
+    #####:  278:                    break;
+    #####:  279:                default:
+    #####:  280:                    fprintf(stdout,"ERROR: Unkown mulecule type\n");
+    #####:  281:                    snprintf(response, response_size, 
+        -:  282:                        "ERROR: Unkown mulecule type\n");
+    #####:  283:                    return;
+        -:  284:                    }
+    #####:  285:                    if(file_flag){
+    #####:  286:                        save_to_file(fd);
+        -:  287:                    }
+    #####:  288:                printf("\n-- UPDATE --\n");
+    #####:  289:                print_storage();
+        -:  290:            }
+    #####:  291:    }else if(sscanf(buf, "%s %s %s",cmd,element_str, element_str2) && strcmp(cmd,"GEN") == 0){
+        -:  292:        // cjeck if we got anther word
+    #####:  293:        if(strlen(element_str2) > 1){
+    #####:  294:            strcat(element_str, " ");
+    #####:  295:            strcat(element_str, element_str2);
+        -:  296:        }
+    #####:  297:        element = element_type_from_str(element_str);
+        -:  298:        
+    #####:  299:        if(sock_handle == KEYBOARD_HANDLE){
+    #####:  300:            unsigned long long min = INT_MAX ;
+    #####:  301:            unsigned long long temp_water = get_water_num(warehouse.oxygen,warehouse.hydrogen);
+    #####:  302:            unsigned long long temp_alcohol = get_alcohol_num(warehouse.carbon,warehouse.oxygen,warehouse.hydrogen);
+    #####:  303:            unsigned long long temp_carbonDio = get_carbonDio_num(warehouse.carbon,warehouse.oxygen);
+    #####:  304:            unsigned long long temp_glucose = get_glucose_num(warehouse.carbon,warehouse.oxygen,warehouse.hydrogen);
+    #####:  305:            switch(element){
+    #####:  306:                case SOFT_DRINK:
+    #####:  307:                    if(min > temp_water){
+    #####:  308:                        min = temp_water;
+        -:  309:                    }
+    #####:  310:                    else if(min > temp_carbonDio){
+    #####:  311:                        min = temp_carbonDio;
+        -:  312:                    }
+    #####:  313:                    else if(min > temp_glucose){
+    #####:  314:                        min = temp_alcohol;
+        -:  315:                    }
+    #####:  316:                    snprintf(response, response_size, 
+        -:  317:                        "The Drink Bar is able to generate --> %lld Soft Drink's\n", min);
+    #####:  318:                    break;
+    #####:  319:                case VODKA:
+    #####:  320:                    if(min > temp_water){
+    #####:  321:                        min = temp_water;
+        -:  322:                    }
+    #####:  323:                    else if(min > temp_glucose){
+    #####:  324:                        min = temp_glucose;
+        -:  325:                    }
+    #####:  326:                    else if(min > temp_alcohol){
+    #####:  327:                        min = temp_alcohol;
+        -:  328:                    }
+    #####:  329:                snprintf(response, response_size, 
+        -:  330:                    "The Drink Bar is able to generate --> %lld Vodka's\n", min);
+    #####:  331:                    break;
+    #####:  332:                case CHAMPAGNE:
+    #####:  333:                    if(min > temp_water){
+    #####:  334:                        min = temp_water;
+        -:  335:                    }
+    #####:  336:                    else if(min > temp_carbonDio){
+    #####:  337:                        min = temp_carbonDio;
+        -:  338:                    }
+    #####:  339:                    else if(min > temp_alcohol){
+    #####:  340:                        min = temp_alcohol;
+        -:  341:                    }
+    #####:  342:                    snprintf(response, response_size, 
+        -:  343:                        "The Drink Bar is able to generate --> %lld Champagne's\n", min);
+    #####:  344:                    break;
+    #####:  345:                default:
+    #####:  346:                    fprintf(stdout,"ERROR: Unkown drink type\n");
+    #####:  347:                    snprintf(response, response_size, 
+        -:  348:                        "ERROR: Unkown drink type\n");
+    #####:  349:                    return;
+        -:  350:            }
+    #####:  351:            if (sock_handle != KEYBOARD_HANDLE){
+    #####:  352:            format_storage(response, response_size);
+    #####:  353:            print_storage();    // Print the storage to server console
+        -:  354:            }
+        -:  355:
+        -:  356:        }
+        -:  357:    }else {                // no ADD no DELIVER? unkown
+    #####:  358:            fprintf(stdout,"ERROR: Unkown command\n");
+    #####:  359:            snprintf(response, response_size, 
+        -:  360:                "ERROR: Unknown command\n");
+        -:  361:        }
+        -:  362:    }
+        -:  363:
+    #####:  364:void sigchld_handler(int s)
+        -:  365:{
+        -:  366:    (void)s; // quiet unused variable warning
+        -:  367:
+        -:  368:    // waitpid() might overwrite errno, so we save and restore it:
+    #####:  369:    int saved_errno = errno;
+        -:  370:
+    #####:  371:    while(waitpid(-1, NULL, WNOHANG) > 0);
+        -:  372:
+    #####:  373:    errno = saved_errno;
+    #####:  374:}
+        -:  375:
+    #####:  376:void *get_in_addr(struct sockaddr *sa)
+        -:  377:{
+    #####:  378:    if (sa->sa_family == AF_INET) {
+    #####:  379:        return &(((struct sockaddr_in*)sa)->sin_addr);
+        -:  380:    }
+        -:  381:
+    #####:  382:    return &(((struct sockaddr_in6*)sa)->sin6_addr);
+        -:  383:}
+        -:  384:
+    #####:  385:void alarm_handler(int signum){
+    #####:  386:    fprintf(stdout,"Server didnt recieved any input in the past %d seconds\nTERMINATING!\n", alarm_timeout);
+    #####:  387:    exit(0);
+        -:  388:}
+        -:  389:
+        -:  390:// for get opt
+        -:  391:extern char *optarg;
+        -:  392:extern int optind, opterr, optopt;
+        -:  393:
+        -:  394:// initializing ports for both UDP and TCP + FD Storage
+        -:  395:char* TCP_PORT = 0;
+        -:  396:char* UDP_PORT = 0;
+        -:  397:char* UNIX_TCP_SOCKET_PATH = NULL;
+        -:  398:char* UNIX_UDP_SOCKET_PATH = NULL;
+        -:  399:char* STORAGE_FILE = 0;
+        -:  400:
+        -:  401:// flag for storage file
+        -:  402:u_int8_t file_flag = 0;
+        -:  403:
+        -:  404:// flags for -o -h -c
+        -:  405:unsigned long long oxygen_input = 0;
+        -:  406:unsigned long long hydrogen_input = 0;
+        -:  407:unsigned long long carbon_input = 0;
+        -:  408:
+    #####:  409:int main(int argc, char*argv[])
+        -:  410:{
+        -:  411:
+        -:  412:     // Check if port was provided as a command-line argument
+    #####:  413:     if (argc < 4) {
+    #####:  414:        fprintf(stderr,"usage: ./drinks_bar.out -T/--tcp-port <int> -U/--udp-port <int> -s/--stream-path <UDS stream file path> -d/--datagram-path <UDS datagram filepath> (OPTIONAL: -o/--oxygen <int=0> -c/--carbon <int=0> -h/--hydrogen <int=0> -t/--timeout <int=0>\n");
+    #####:  415:        exit(1);
+        -:  416:    }
+        -:  417:
+    #####:  418:    struct option longopts[] = {
+        -:  419:        {"udp-port",required_argument,NULL,'U'},
+        -:  420:        {"tcp-port",required_argument,NULL,'T'},
+        -:  421:        {"oxygen",optional_argument,NULL,'o'},
+        -:  422:        {"carbon",optional_argument,NULL,'c'},
+        -:  423:        {"hydrogen",optional_argument,NULL,'h'},
+        -:  424:        {"timeout",optional_argument,NULL,'t'},
+        -:  425:        {"stream-path",optional_argument,NULL,'s'},
+        -:  426:        {"datagram-path",optional_argument,NULL,'d'},
+        -:  427:        {"save-file",optional_argument,NULL,'f'},
+        -:  428:        {0,0,0,0}
+        -:  429:    };
+        -:  430:
+        -:  431:    // check then option you got from the user:
+    #####:  432:    int ret = getopt_long(argc, argv, ":U:T:d:s:o:c:h:t:f:", longopts, NULL);
+        -:  433:    char *endptr; // for checking if the value is digit
+    #####:  434:    long val = 0;
+        -:  435:
+    #####:  436:    while(ret != -1){
+    #####:  437:        switch(ret){
+    #####:  438:            case 'f':{
+    #####:  439:                if (optarg == NULL) {
+    #####:  440:                    fprintf(stderr, "ERROR: Missing argument for option -%c\n", ret);
+    #####:  441:                    exit(1);
+        -:  442:                }
+    #####:  443:                STORAGE_FILE = optarg;
+    #####:  444:                file_flag =1;
+        -:  445:            }
+    #####:  446:                break;
+    #####:  447:            case 'U': {
+    #####:  448:                if (optarg == NULL) {
+    #####:  449:                    fprintf(stderr, "ERROR: Missing argument for option -%c\n", ret);
+    #####:  450:                    exit(1);
+        -:  451:                }
+    #####:  452:                val = strtol(optarg, &endptr, 10);
+    #####:  453:                if (*endptr != '\0' || val <= 0 || val > 65535) {
+    #####:  454:                    fprintf(stderr,"ERROR: Invalid argument for UDP PORT\n");
+    #####:  455:                    exit(1);
+        -:  456:                }
+    #####:  457:                UDP_PORT = optarg;
+    #####:  458:                break;
+        -:  459:            }
+    #####:  460:            case 'T': {
+    #####:  461:                if (optarg == NULL) {
+    #####:  462:                    fprintf(stderr, "ERROR: Missing argument for option -%c\n", ret);
+    #####:  463:                    exit(1);
+        -:  464:                }
+    #####:  465:                val = strtol(optarg, &endptr, 10);
+    #####:  466:                if (*endptr != '\0') {
+    #####:  467:                    fprintf(stderr,"ERROR: Invalid argument for TCP PORT\n");
+    #####:  468:                    exit(1);
+        -:  469:                }
+    #####:  470:                TCP_PORT = optarg;
+    #####:  471:                break;
+        -:  472:            }
+    #####:  473:            case 'd': {
+    #####:  474:                if (optarg == NULL) {
+    #####:  475:                    fprintf(stderr, "ERROR: Missing argument for option -%c\n", ret);
+    #####:  476:                    exit(1);
+        -:  477:                }
+    #####:  478:                UNIX_UDP_SOCKET_PATH = optarg;
+    #####:  479:                break;
+        -:  480:            }
+    #####:  481:            case 's': {
+    #####:  482:                if (optarg == NULL) {
+    #####:  483:                    fprintf(stderr, "ERROR: Missing argument for option -%c\n", ret);
+    #####:  484:                    exit(1);
+        -:  485:                }
+    #####:  486:                UNIX_TCP_SOCKET_PATH = optarg;
+    #####:  487:                break;
+        -:  488:            }
+    #####:  489:            case 'o': {
+    #####:  490:                if (optarg == NULL) {
+    #####:  491:                    fprintf(stderr, "ERROR: Missing argument for option -%c\n", ret);
+    #####:  492:                    exit(1);
+        -:  493:                }
+    #####:  494:                val = strtol(optarg, &endptr, 10);
+    #####:  495:                if (*endptr != '\0') {
+    #####:  496:                    fprintf(stderr,"ERROR: Invalid argument for Oxygen\n");
+    #####:  497:                    exit(1);
+        -:  498:                }
+    #####:  499:                oxygen_input = (unsigned long long)val;
+        -:  500:
+    #####:  501:                break;
+        -:  502:            }
+    #####:  503:            case 'c': {
+    #####:  504:                if (optarg == NULL) {
+    #####:  505:                    fprintf(stderr, "ERROR: Missing argument for option -%c\n", ret);
+    #####:  506:                    exit(1);
+        -:  507:                }
+    #####:  508:                val = strtol(optarg, &endptr, 10);
+    #####:  509:                if (*endptr != '\0') {
+    #####:  510:                    fprintf(stderr,"ERROR: Invalid argument for Carbon\n");
+    #####:  511:                    exit(1);
+        -:  512:                }
+    #####:  513:                carbon_input = (unsigned long long)val;
+    #####:  514:                break;
+        -:  515:            }
+    #####:  516:            case 'h': {
+    #####:  517:                if (optarg == NULL) {
+    #####:  518:                    fprintf(stderr, "ERROR: Missing argument for option -%c\n", ret);
+    #####:  519:                    exit(1);
+        -:  520:                }
+    #####:  521:                val = strtol(optarg, &endptr, 10);
+    #####:  522:                if (*endptr != '\0') {
+    #####:  523:                    fprintf(stderr,"ERROR: Invalid argument for Hydrogen\n");
+    #####:  524:                    exit(1);
+        -:  525:                }
+    #####:  526:                hydrogen_input = (unsigned long long)val;
+    #####:  527:                break;
+        -:  528:            }
+    #####:  529:            case 't': {
+    #####:  530:                if (optarg == NULL) {
+    #####:  531:                    fprintf(stderr, "ERROR: Missing argument for option -%c\n", ret);
+    #####:  532:                    exit(1);
+        -:  533:                }
+    #####:  534:                val = strtol(optarg, &endptr, 10);
+    #####:  535:                if (*endptr != '\0') {
+    #####:  536:                    fprintf(stderr,"ERROR: Invalid argument for Timeout\n");
+    #####:  537:                    exit(1);
+        -:  538:                }
+    #####:  539:                alarm_timeout = (int)val;
+    #####:  540:                break;
+        -:  541:            }
+    #####:  542:            default:
+    #####:  543:                fprintf(stderr,"ERROR: usage: ./drinks_bar.out -T/--tcp-port <int> -U/--udp-port <int> (OPTIONAL: -o/--oxygen <int=0> -c/--carbon <int=0> -h/--hydrogen <int=0> -t/--timeout <int=0>\n");
+    #####:  544:                exit(1);
+        -:  545:        }
+    #####:  546:        ret = getopt_long(argc, argv, ":U:T:d:s:o:c:h:t:f:", longopts, NULL);
+        -:  547:    }
+        -:  548:
+        -:  549:    // if file flag is on, chec if file exists
+        -:  550:    //  TRUE    - Export file to the storage and update each change into the file (ignore -o -h -c additions)
+        -:  551:    //  FALSE   - Import current storage into the file and update each change into the file
+        -:  552:    // ignore -h -o -c values , else don't.
+        -:  553:    // *********************************
+        -:  554:    // *                               *
+        -:  555:    // * <CARBON> <OXYGEN> <HYDROGEN>  *
+        -:  556:    // *                               *
+        -:  557:    // *********************************
+    #####:  558:    int fd = open(STORAGE_FILE, O_RDWR, S_IRUSR | S_IWUSR);
+    #####:  559:    if(file_flag){
+    #####:  560:        if(fd != -1){ // IF FILE EXISTS
+    #####:  561:            int reader = read(fd, &warehouse, sizeof(AtomStorage));
+        -:  562:
+        -:  563:            // FILE EXISTS BUT NO INPUT
+    #####:  564:            if( reader <= 0){
+    #####:  565:                fprintf(stderr,"ERROR: FILE EXISTS, NO INPUT\n");
+    #####:  566:                close(fd);
+    #####:  567:                exit(1);
+        -:  568:            }
+        -:  569:
+        -:  570:            // IF NO STRUCT SIZE, WRONG FORMAT, ERROR
+    #####:  571:            if (reader != sizeof(AtomStorage)) {
+    #####:  572:                fprintf(stderr,"ERROR: WRONG FORMAT\n");
+    #####:  573:                close(fd);
+    #####:  574:                return 0;
+        -:  575:            }
+        -:  576:
+        -:  577:        }else{ // FILE DOESNT EXISTS, CREATE IT AND UPDATE ITS FIELD
+    #####:  578:            fprintf(stdout,"WARNING: File: %s, creating file and storing storage predefined input",STORAGE_FILE);
+    #####:  579:            fd = open(STORAGE_FILE, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+        -:  580:
+        -:  581:            // UPDATE THE CURRENT STORAGE FROM USER INPUT
+    #####:  582:            warehouse.carbon = carbon_input;
+    #####:  583:            warehouse.oxygen = oxygen_input;
+    #####:  584:            warehouse.hydrogen =  hydrogen_input;
+        -:  585:
+        -:  586:            // LOCK THE FILE, IF ERROR, END PROCCESS
+    #####:  587:            if (flock(fd, LOCK_EX) == -1){
+    #####:  588:                perror("server flock");
+    #####:  589:                close(fd);
+    #####:  590:                exit(1);
+        -:  591:            }
+        -:  592:
+        -:  593:            // CHECK FOR WRITE ISSUES
+    #####:  594:            if(write(fd, &warehouse, sizeof(AtomStorage)) == -1){
+    #####:  595:                perror("server write");
+    #####:  596:                close(fd);
+    #####:  597:                exit(1);
+        -:  598:            }
+        -:  599:
+        -:  600:            // UNLOCK THE LOCK
+    #####:  601:            flock(fd, LOCK_UN);
+        -:  602:        }
+        -:  603:    }else{
+        -:  604:        // No file flag, only user input
+    #####:  605:        warehouse.carbon = carbon_input;
+    #####:  606:        warehouse.oxygen = oxygen_input;
+    #####:  607:        warehouse.hydrogen =  hydrogen_input;
+        -:  608:    }
+        -:  609:
+        -:  610:    // Socket file descriptors
+        -:  611:    int tcp_sockfd, new_fd;  // sockfd = listening socket, new_fd = client connection socket
+        -:  612:    
+        -:  613:    // Network address structures for server setup
+        -:  614:    struct addrinfo tcp_hints, *tcp_servinfo, *tcp_p;  // hints = criteria, servinfo = results list, p = iterator
+        -:  615:    struct sockaddr_storage their_addr;    // Storage for client's address information
+        -:  616:    socklen_t sin_size;                    // Size of client address structure
+        -:  617:    
+        -:  618:    
+        -:  619:    // Socket options and utility variables
+        -:  620:    char s[INET6_ADDRSTRLEN];    // Buffer to store client IP address as string
+        -:  621:    int rv;                      // Return value for getaddrinfo()
+        -:  622:
+        -:  623:    // STEP 1: Configure server address criteria
+    #####:  624:    memset(&tcp_hints, 0, sizeof tcp_hints);
+    #####:  625:    tcp_hints.ai_family = AF_INET;      // Use IPv4
+    #####:  626:    tcp_hints.ai_socktype = SOCK_STREAM; // Use TCP (reliable, connection-oriented)
+    #####:  627:    tcp_hints.ai_flags = AI_PASSIVE;    // Use local machine's IP address
+        -:  628:
+        -:  629:    // STEP 2: Get list of possible addresses to bind to
+    #####:  630:    if ((rv = getaddrinfo(NULL, TCP_PORT, &tcp_hints, &tcp_servinfo)) != 0) {
+    #####:  631:        fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
+    #####:  632:        return 1;
+        -:  633:    }
+        -:  634:
+        -:  635:
+        -:  636:    // STEP 3: Try to create socket and bind to first available address
+    #####:  637:    for(tcp_p = tcp_servinfo; tcp_p != NULL; tcp_p = tcp_p->ai_next) {
+        -:  638:        // Create socket with the address family, type, and protocol
+    #####:  639:        if ((tcp_sockfd = socket(tcp_p->ai_family, tcp_p->ai_socktype, tcp_p->ai_protocol)) == -1) {
+    #####:  640:            perror("server: socket");
+    #####:  641:            continue;  // Try next address if socket creation fails
+        -:  642:        }
+        -:  643:
+        -:  644:        // Bind socket to the address and port
+    #####:  645:        if (bind(tcp_sockfd, tcp_p->ai_addr, tcp_p->ai_addrlen) == -1) {
+    #####:  646:            close(tcp_sockfd);
+    #####:  647:            perror("server: bind");
+    #####:  648:            continue;  // Try next address if bind fails
+        -:  649:        }
+        -:  650:
+    #####:  651:        break;  // Success! Exit the loop
+        -:  652:    }
+        -:  653:
+    #####:  654:    freeaddrinfo(tcp_servinfo); // Clean up the address list
+        -:  655:
+        -:  656:    // Check if we successfully bound to an address
+    #####:  657:    if (tcp_p == NULL)  {
+    #####:  658:        fprintf(stderr, "server: failed to bind\n");
+    #####:  659:        exit(1);
+        -:  660:    }
+        -:  661:
+        -:  662:    // STEP 4: Start listening for client connections
+    #####:  663:    if (listen(tcp_sockfd, BACKLOG) == -1) {
+    #####:  664:        perror("listen");
+    #####:  665:        exit(1);
+        -:  666:    }
+        -:  667:
+        -:  668:    // Create UDP socket, same as above TCP configuration
+        -:  669:    int udp_sockfd;
+        -:  670:    struct addrinfo udp_hints, *udp_servinfo, *udp_p;
+    #####:  671:    memset(&udp_hints, 0, sizeof udp_hints);
+    #####:  672:    udp_hints.ai_family = AF_INET;
+    #####:  673:    udp_hints.ai_socktype = SOCK_DGRAM;
+    #####:  674:    udp_hints.ai_flags = AI_PASSIVE;
+        -:  675:
+    #####:  676:    if ((rv = getaddrinfo(NULL, UDP_PORT, &udp_hints, &udp_servinfo)) != 0) {
+    #####:  677:        fprintf(stderr, "getaddrinfo (UDP): %s\n", gai_strerror(rv));
+    #####:  678:        exit(1);
+        -:  679:    }
+        -:  680:
+    #####:  681:    for(udp_p = udp_servinfo; udp_p != NULL; udp_p = udp_p->ai_next) {
+    #####:  682:        if ((udp_sockfd = socket(udp_p->ai_family, udp_p->ai_socktype, udp_p->ai_protocol)) == -1) {
+    #####:  683:            perror("server: udp socket");
+    #####:  684:            continue;
+        -:  685:        }
+    #####:  686:        if (bind(udp_sockfd, udp_p->ai_addr, udp_p->ai_addrlen) == -1) {
+    #####:  687:            close(udp_sockfd);
+    #####:  688:            perror("server: udp bind");
+    #####:  689:            continue;
+        -:  690:        }
+    #####:  691:        break;
+        -:  692:    }
+    #####:  693:    freeaddrinfo(udp_servinfo);
+        -:  694:
+    #####:  695:    if (udp_p == NULL) {
+    #####:  696:        fprintf(stderr, "server: failed to bind UDP socket\n");
+    #####:  697:        exit(1);
+        -:  698:    }
+        -:  699:
+        -:  700:    int unix_tcp_sockfd;
+        -:  701:    // UNIX DOMAIN SOCKETS CREATION
+    #####:  702:    if(UNIX_TCP_SOCKET_PATH != NULL){
+        -:  703:    // START TCP UNIX DS
+        -:  704:    struct sockaddr_un unix_tcp_addr;
+        -:  705:
+        -:  706:    // create a unix tcp socket
+    #####:  707:    if((unix_tcp_sockfd = socket(AF_UNIX,SOCK_STREAM,0)) == -1){
+    #####:  708:        perror("unix tcp socket");
+    #####:  709:        exit(1);
+        -:  710:    }
+        -:  711:    // remove any existing socket file
+    #####:  712:    unlink(UNIX_TCP_SOCKET_PATH);
+        -:  713:
+        -:  714:    // setup unix address
+    #####:  715:    memset(&unix_tcp_addr, 0, sizeof(unix_tcp_addr));
+    #####:  716:    unix_tcp_addr.sun_family = AF_UNIX;
+    #####:  717:    strcpy(unix_tcp_addr.sun_path, UNIX_TCP_SOCKET_PATH);
+        -:  718:
+        -:  719:    // bind socket to given path
+    #####:  720:    if (bind(unix_tcp_sockfd,(struct sockaddr*)&unix_tcp_addr,sizeof(unix_tcp_addr)) == -1){
+    #####:  721:        perror("bind unix tcp");
+    #####:  722:        exit(1);
+        -:  723:    }
+        -:  724:
+        -:  725:    // now listen for any connection
+    #####:  726:    if(listen(unix_tcp_sockfd, BACKLOG) == -1){
+    #####:  727:        perror("listen unix tcp");
+    #####:  728:        exit(1);
+        -:  729:    }
+        -:  730:
+        -:  731:    // END TCP UNIX DS
+        -:  732:    }
+        -:  733:
+        -:  734:    int unix_udp_sockfd;
+    #####:  735:    if(UNIX_UDP_SOCKET_PATH != NULL){
+        -:  736:    // START UDP UNIX DS
+        -:  737:    struct sockaddr_un unix_udp_addr;
+        -:  738:
+        -:  739:    // Create UNIX UDP socket
+    #####:  740:    if ((unix_udp_sockfd = socket(AF_UNIX, SOCK_DGRAM, 0)) == -1) {
+    #####:  741:        perror("unix udp socket");
+    #####:  742:        exit(1);
+        -:  743:    }
+        -:  744:
+        -:  745:    // Remove any existing socket file
+    #####:  746:    unlink(UNIX_UDP_SOCKET_PATH);
+        -:  747:  
+        -:  748:    // Setup UNIX UDP address
+    #####:  749:    memset(&unix_udp_addr, 0, sizeof(unix_udp_addr));
+    #####:  750:    unix_udp_addr.sun_family = AF_UNIX;
+    #####:  751:    strcpy(unix_udp_addr.sun_path, UNIX_UDP_SOCKET_PATH);
+        -:  752:
+        -:  753:    // Bind UDP socket
+    #####:  754:    if (bind(unix_udp_sockfd, (struct sockaddr*)&unix_udp_addr, sizeof(unix_udp_addr)) == -1) {
+    #####:  755:        perror("bind unix udp");
+    #####:  756:        exit(1);
+        -:  757:    }
+        -:  758:    
+        -:  759:    // END UDP UNIX DS
+        -:  760:    }
+        -:  761:    
+        -:  762:    // Array of pollfd structures to track file descriptors
+        -:  763:    struct pollfd fds[MAX_CLIENTS + 5];
+        -:  764:
+    #####:  765:    int nfds = 0;
+        -:  766:
+        -:  767:    // Initialize the first pollfd to watch for incoming connections on the listener socket
+    #####:  768:    fds[0].fd = tcp_sockfd;
+    #####:  769:    fds[0].events = POLLIN;  // Watch for incoming data
+    #####:  770:    nfds++;
+        -:  771:
+    #####:  772:    fds[1].fd = udp_sockfd;
+    #####:  773:    fds[1].events = POLLIN;
+    #####:  774:    nfds++;
+        -:  775:
+    #####:  776:    fds[2].fd = STDIN_FILENO;
+    #####:  777:    fds[2].events = POLLIN;
+    #####:  778:    nfds++;
+        -:  779:
+    #####:  780:    if(UNIX_UDP_SOCKET_PATH != NULL){
+    #####:  781:    fds[3].fd = unix_udp_sockfd;
+    #####:  782:    fds[3].events = POLLIN;
+    #####:  783:    nfds++;
+        -:  784:    }
+    #####:  785:    if(UNIX_TCP_SOCKET_PATH != NULL){
+    #####:  786:    fds[4].fd = unix_tcp_sockfd;
+    #####:  787:    fds[4].events = POLLIN;
+    #####:  788:    nfds++;
+        -:  789:    }
+        -:  790:    
+        -:  791:
+        -:  792:
+    #####:  793:    printf("server: waiting for connections...\n");
+        -:  794:
+    #####:  795:    signal(SIGALRM,alarm_handler);
+        -:  796:
+        -:  797:    // STEP 6: Main server loop - accept and handle client connections
+    #####:  798:    while(1) {
+        -:  799:
+        -:  800:            // START alarm
+    #####:  801:            alarm(alarm_timeout);
+        -:  802:
+    #####:  803:        sin_size = sizeof their_addr;
+        -:  804:        
+        -:  805:        // Wait for activity on the sockets (blocks until activity occurs)
+    #####:  806:        int poll_count = poll(fds, nfds, -1);  // -1 means wait indefinitely
+        -:  807:
+    #####:  808:        if (poll_count == -1) {
+    #####:  809:            perror("poll");
+    #####:  810:            exit(1);
+        -:  811:        }
+        -:  812:
+        -:  813:
+        -:  814:        // Loop through all file descriptors to check for events
+    #####:  815:        for (int i = 0; i < nfds; i++) {
+        -:  816:
+        -:  817:            // Skip if no events
+    #####:  818:            if (fds[i].revents == 0) continue;
+        -:  819:
+        -:  820:            // Handle data from existing TCP and UNIX TCP clients first
+    #####:  821:            if ((fds[i].revents & POLLIN) && 
+    #####:  822:                fds[i].fd != tcp_sockfd && fds[i].fd != unix_tcp_sockfd &&
+    #####:  823:                fds[i].fd != udp_sockfd && fds[i].fd != unix_udp_sockfd &&
+    #####:  824:                fds[i].fd != STDIN_FILENO) {
+        -:  825:
+    #####:  826:                alarm(0);
+        -:  827:                char buf[MAXDATASIZE];
+    #####:  828:                int numbytes = recv(fds[i].fd, buf, sizeof(buf) - 1, 0);
+    #####:  829:                if (numbytes < 1) {
+    #####:  830:                    if (numbytes == 0) {
+        -:  831:                        // client closed
+        -:  832:                    } else {
+    #####:  833:                        perror("recv");
+        -:  834:                    }
+    #####:  835:                    close(fds[i].fd);
+    #####:  836:                    fds[i] = fds[nfds - 1]; nfds--; i--;
+        -:  837:                } else {
+    #####:  838:                    buf[numbytes] = '\0';
+    #####:  839:                    printf("server: received '%s' on socket %d\n", buf, fds[i].fd);
+        -:  840:                    char response[256];
+    #####:  841:                    process_message(buf, numbytes, TCP_HANDLE, response, sizeof(response), file_flag, fd);
+    #####:  842:                    if (send(fds[i].fd, response, strlen(response), 0) == -1) perror("send");
+    #####:  843:                    else printf("server: sent response to socket %d\n", fds[i].fd);
+        -:  844:                }
+    #####:  845:                continue;
+        -:  846:            }
+        -:  847:
+        -:  848:            // Handle errors (exclude POLLHUP if POLLIN was handled)
+    #####:  849:            if ((fds[i].revents & (POLLERR | POLLNVAL)) ||
+    #####:  850:                ((fds[i].revents & POLLHUP) && !(fds[i].revents & POLLIN))) {
+    #####:  851:                if (fds[i].fd != tcp_sockfd && fds[i].fd != udp_sockfd) {
+    #####:  852:                    close(fds[i].fd);
+    #####:  853:                    fds[i] = fds[nfds - 1]; nfds--; i--;
+        -:  854:                } else {
+    #####:  855:                    fprintf(stderr, "Critical error on listening or UDP socket (fd %d)\n", fds[i].fd);
+        -:  856:                }
+    #####:  857:                continue;
+        -:  858:            }
+        -:  859:
+        -:  860:        // KEYBOARD listening socket
+    #####:  861:        if (fds[i].fd == STDIN_FILENO && (fds[i].revents & POLLIN)) {
+        -:  862:
+    #####:  863:                    alarm(0); // RESET ALARM
+        -:  864:
+    #####:  865:                    char server_input[256] = {0}; // setting a new buffer for user input
+    #####:  866:                    char response[100] = {0};
+        -:  867:                    
+    #####:  868:                    printf("KEYBOARD: ");
+        -:  869:
+        -:  870:                    // chec if no error occured
+    #####:  871:                    if(fgets(server_input,sizeof(server_input),stdin) != NULL){
+    #####:  872:                        process_message(server_input,strlen(server_input)+1,KEYBOARD_HANDLE,response,sizeof(response), file_flag, fd);
+    #####:  873:                        printf("%s\n", response);
+        -:  874:
+        -:  875:                    }
+        -:  876:
+    #####:  877:            continue;
+        -:  878:        }
+        -:  879:        
+        -:  880:        // Handle UDP socket
+    #####:  881:        if (fds[i].fd == udp_sockfd && (fds[i].revents & POLLIN)) {
+        -:  882:
+    #####:  883:            alarm(0); // RESET ALARM
+        -:  884:
+        -:  885:            char udp_buf[MAXDATASIZE];
+        -:  886:            struct sockaddr_storage udp_client_addr;
+    #####:  887:            socklen_t udp_addr_len = sizeof udp_client_addr;
+    #####:  888:            int udp_numbytes = recvfrom(udp_sockfd, udp_buf, sizeof(udp_buf) - 1, 0,
+        -:  889:                                        (struct sockaddr *)&udp_client_addr, &udp_addr_len);
+    #####:  890:            if (udp_numbytes > 0) {
+    #####:  891:                udp_buf[udp_numbytes] = '\0';
+        -:  892:
+        -:  893:                // Process the message
+        -:  894:                char response[256];
+    #####:  895:                process_message(udp_buf, udp_numbytes, UDP_HANDLE, response, sizeof(response), file_flag, fd);
+        -:  896:
+        -:  897:                // Send response back to UDP client
+    #####:  898:                if (sendto(udp_sockfd, response, strlen(response), 0,
+        -:  899:                        (struct sockaddr *)&udp_client_addr, udp_addr_len) == -1) {
+    #####:  900:                    perror("sendto");
+        -:  901:                }
+        -:  902:            }
+    #####:  903:            continue; // Done with UDP, continue to next fd
+        -:  904:        }
+        -:  905:
+        -:  906:        // TCP listening socket, handles connection establishments
+    #####:  907:        if (fds[i].fd == tcp_sockfd && (fds[i].revents & POLLIN)) {
+        -:  908:
+    #####:  909:            alarm(0); // RESET ALARM
+        -:  910:
+        -:  911:            // Accept new connection
+    #####:  912:            sin_size = sizeof their_addr;
+        -:  913:            // Accept incoming client connection (blocks until client connects)
+    #####:  914:            new_fd = accept(tcp_sockfd, (struct sockaddr *)&their_addr, &sin_size);
+    #####:  915:            if (new_fd == -1) {
+    #####:  916:                perror("accept");
+        -:  917:            } else {
+        -:  918:                // Make sure we have room for a new client
+    #####:  919:                if (nfds < MAX_CLIENTS + 5) {
+        -:  920:                    // Add the new connection to our array
+    #####:  921:                    fds[nfds].fd = new_fd;
+    #####:  922:                    fds[nfds].events = POLLIN;
+    #####:  923:                    nfds++;
+        -:  924:                    
+        -:  925:                    // Print connection info
+    #####:  926:                    inet_ntop(their_addr.ss_family, get_in_addr((struct sockaddr*)&their_addr),
+        -:  927:                              s, sizeof s);
+    #####:  928:                    printf("server: new connection from %s on socket %d\n", s, new_fd);
+        -:  929:                } else {
+        -:  930:                    // We're at capacity, reject this client
+    #####:  931:                    printf("server: too many clients, rejecting new connection\n");
+    #####:  932:                    close(new_fd);
+        -:  933:                }
+        -:  934:            }
+    #####:  935:            continue;
+        -:  936:        }
+        -:  937:
+        -:  938:        // UNIX TCP listening socket, handles connection establishments
+    #####:  939:        if (fds[i].fd == unix_tcp_sockfd && (fds[i].revents & POLLIN)) {
+    #####:  940:            alarm(0); // RESET ALARM
+        -:  941:
+        -:  942:            // Accept new connection
+    #####:  943:            sin_size = sizeof(their_addr);
+        -:  944:            // Accept incoming client connection (blocks until client connects)
+    #####:  945:            new_fd = accept(unix_tcp_sockfd, NULL, NULL);
+    #####:  946:            if (new_fd == -1) {
+    #####:  947:                perror("accept");
+    #####:  948:            } else if (nfds < MAX_CLIENTS + 5) {
+    #####:  949:                fds[nfds].fd     = new_fd;
+    #####:  950:                fds[nfds].events = POLLIN;
+    #####:  951:                nfds++;
+    #####:  952:                printf("server: new UNIX TCP connection on socket %d\n", new_fd);
+        -:  953:            } else {
+    #####:  954:                printf("server: too many clients, rejecting new connection\n");
+    #####:  955:                close(new_fd);
+        -:  956:            }
+    #####:  957:            continue; 
+        -:  958:        }
+        -:  959:
+        -:  960:        // Handle UNIX UDP socket
+    #####:  961:        if (fds[i].fd == unix_udp_sockfd && (fds[i].revents & POLLIN)) {
+    #####:  962:            alarm(0); // RESET ALARM
+        -:  963:
+        -:  964:            char udp_buf[MAXDATASIZE];
+        -:  965:            struct sockaddr_un unix_udp_client_addr;
+    #####:  966:            socklen_t unix_udp_addr_len = sizeof unix_udp_client_addr;
+    #####:  967:            int unix_udp_numbytes = recvfrom(unix_udp_sockfd, udp_buf, sizeof(udp_buf) - 1, 0,
+        -:  968:                                        (struct sockaddr *)&unix_udp_client_addr, &unix_udp_addr_len);
+    #####:  969:            if (unix_udp_numbytes > 0) {
+    #####:  970:                udp_buf[unix_udp_numbytes] = '\0';
+        -:  971:
+        -:  972:                // Process the message
+        -:  973:                char response[256];
+    #####:  974:                process_message(udp_buf, unix_udp_numbytes, UDP_HANDLE, response, sizeof(response), file_flag, fd);
+        -:  975:
+        -:  976:                // Send response back to UDP client
+    #####:  977:                if (sendto(unix_udp_sockfd, response, strlen(response), 0,
+        -:  978:                        (struct sockaddr *)&unix_udp_client_addr, unix_udp_addr_len) == -1) {
+    #####:  979:                    perror("sendto");
+        -:  980:                    }
+        -:  981:                }
+    #####:  982:            continue; // Done with UNIX_UDP, continue to next fd
+        -:  983:            }
+        -:  984:        // END OF ALARM
+        -:  985:        }   
+        -:  986:
+        -:  987:    }
+        -:  988:    close(fd);
+        -:  989:}

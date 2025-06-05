@@ -1,0 +1,316 @@
+        -:    0:Source:src/atom_supplier.c
+        -:    1:/**
+        -:    2: * @file atom_supplier.c
+        -:    3: * @brief Client side network application that connects to a server and receives data
+        -:    4: * https://beej.us/guide/bgnet/html/split-wide/client-server-background.html#a-simple-stream-client
+        -:    5: * @date 2025-05-31
+        -:    6: */
+        -:    7:
+        -:    8:#include <stdio.h>      // Standard input/output functions (printf, fprintf, etc.)
+        -:    9:#include <stdlib.h>     // General utilities (exit, malloc, etc.)
+        -:   10:#include <unistd.h>     // UNIX standard functions (close, etc.)
+        -:   11:#include <errno.h>      // Error number definitions
+        -:   12:#include <string.h>     // String manipulation functions (memset, etc.)
+        -:   13:#include <netdb.h>      // Network database operations (getaddrinfo, etc.)
+        -:   14:#include <sys/types.h>  // Various data type definitions 
+        -:   15:#include <netinet/in.h> // Internet address family structures and constants
+        -:   16:#include <sys/socket.h> // Socket API definitions
+        -:   17:#include <ctype.h>
+        -:   18:#include <arpa/inet.h>  // Functions for manipulating IP addresses (inet_ntop, etc.)
+        -:   19:#include "../include/const.h"
+        -:   20:#include "../include/atom_supplier_funcs.h"
+        -:   21:#include <unistd.h>
+        -:   22:#include <getopt.h>
+        -:   23:#include <sys/un.h>
+        -:   24:
+        5:   25:void ask_supplier(unsigned long long* amount, char* atom, size_t atom_size) {
+        5:   26:    int index = 0;
+        -:   27:    
+        5:   28:    memset(atom, 0, atom_size);  // Safe clearing
+        -:   29:    
+        5:   30:    printf("Enter your desired choice:\n(1) CARBON\n(2) OXYGEN\n(3) HYDROGEN\n");
+        5:   31:    if (scanf("%d", &index) != 1) {
+    #####:   32:        fprintf(stderr, "Error: Invalid input\n");
+    #####:   33:        return;
+        -:   34:    }
+        -:   35:    
+        5:   36:    printf("Enter your desired amount:\n");
+        5:   37:    if (scanf("%llu", amount) != 1) {  // %llu for unsigned long long
+    #####:   38:        fprintf(stderr, "Error: Invalid amount\n");
+    #####:   39:        return;
+        -:   40:    }
+        -:   41:    
+        5:   42:    switch(index) {
+        2:   43:        case 1: strncpy(atom, "CARBON", atom_size-1); break;
+        2:   44:        case 2: strncpy(atom, "OXYGEN", atom_size-1); break;
+        1:   45:        case 3: strncpy(atom, "HYDROGEN", atom_size-1); break;
+    #####:   46:        default: 
+    #####:   47:            fprintf(stderr, "Error: Invalid selection\n");
+    #####:   48:            return;
+        -:   49:    }
+        5:   50:    atom[atom_size-1] = '\0';  // Ensure null-termination
+        -:   51:}
+        -:   52:
+    #####:   53:void ask_requester(unsigned long long* amount, char* element, size_t element_size) {
+    #####:   54:    int index = 0;
+        -:   55:    
+    #####:   56:    memset(element, 0, element_size);  // Safe clearing
+        -:   57:    
+    #####:   58:    printf("Enter your desired choice:\n(1) WATER\n(2) CARBON DIOXIDE\n(3) GLUCOSE\n(4) ALCOHOL\n");
+    #####:   59:    if (scanf("%d", &index) != 1) {
+    #####:   60:        fprintf(stderr, "Error: Invalid input\n");
+    #####:   61:        return;
+        -:   62:    }
+        -:   63:    
+    #####:   64:    printf("Enter your desired amount:\n");
+    #####:   65:    if (scanf("%llu", amount) != 1) {  // %llu for unsigned long long
+    #####:   66:        fprintf(stderr, "Error: Invalid amount\n");
+    #####:   67:        return;
+        -:   68:    }
+        -:   69:
+    #####:   70:    switch(index) {
+    #####:   71:        case 1: strncpy(element, "WATER", element_size-1); break;
+    #####:   72:        case 2: strncpy(element, "CARBONDIOXIDE", element_size-1); break;
+    #####:   73:        case 3: strncpy(element, "GLUCOSE", element_size-1); break;
+    #####:   74:        case 4: strncpy(element, "ALCOHOL", element_size-1); break;
+    #####:   75:        default: 
+    #####:   76:            fprintf(stderr, "Error: Invalid selection\n");
+    #####:   77:            return;
+        -:   78:    }
+    #####:   79:    element[element_size-1] = '\0';  // Ensure null-termination
+        -:   80:}
+        -:   81:
+        9:   82:void *get_in_addr(struct sockaddr *sa)
+        -:   83:{
+        -:   84:    // Check if the address is IPv4
+        9:   85:    if (sa->sa_family == AF_INET) {
+        -:   86:        // If IPv4, return the address from sockaddr_in structure
+        6:   87:        return &(((struct sockaddr_in*)sa)->sin_addr);
+        -:   88:    }
+        -:   89:
+        -:   90:    // Otherwise, assume IPv6 and return the address from sockaddr_in6 structure
+        3:   91:    return &(((struct sockaddr_in6*)sa)->sin6_addr);
+        -:   92:}
+        -:   93:
+        -:   94:// for get opt
+        -:   95:extern char *optarg;
+        -:   96:extern int optind, opterr, optopt;
+        -:   97:
+        -:   98:const char* IP; // The IP number the client will connect to on the server
+        -:   99:const char* PORT; // The port number the client will connect to on the server
+        -:  100:const char* PATH; // Path for the AF_UNIX prot
+        -:  101:
+        -:  102:// ARGUMENTS FLAGS
+        -:  103:int flag_f = 0;
+        -:  104:int flag_h = 0;
+        -:  105:int flag_p = 0;
+        -:  106:
+        5:  107:int main(int argc, char *argv[])
+        -:  108:{
+        -:  109:    int sockfd;                     // Socket file descriptor
+        -:  110:    int numbytes;                   // Number of bytes received 
+        -:  111:    char buf[MAXDATASIZE];          // Buffer to store received data
+        -:  112:    struct addrinfo hints;          // Criteria for address selection
+        -:  113:    struct addrinfo *servinfo;      // Linked list of results from getaddrinfo
+        -:  114:    struct addrinfo *p;             // Pointer to traverse servinfo list
+        -:  115:    int rv;                         // Return value for getaddrinfo
+        -:  116:    char s[INET6_ADDRSTRLEN];       // Buffer to store string representation of IP address
+        -:  117:
+        -:  118:    // Check if all the needed args was provided as a command-line argument
+        5:  119:    if (argc < 3) {
+    #####:  120:        fprintf(stderr,"usage: ./atom_supplier.out -h <IP/hostname> -p <port> OR -f <UDS socket file path>\n");
+    #####:  121:        exit(1);
+        -:  122:    }
+        -:  123:
+        -:  124:
+        -:  125:    // check then option you got from the user:
+        5:  126:    int ret = getopt(argc, argv, ":p:h:f:");
+        -:  127:    char *endptr; // for checking if the value is digit
+        5:  128:    long val = 0;
+        -:  129:
+       13:  130:      while(ret != -1){
+        8:  131:        switch(ret){
+        3:  132:            case 'p': {
+        3:  133:                if(flag_f){
+    #####:  134:                    fprintf(stderr, "ERROR: cannot use -f and (-p, -h) together\n");
+    #####:  135:                    exit(1);
+        -:  136:                }
+        3:  137:                if (optarg == NULL) {
+    #####:  138:                    fprintf(stderr, "ERROR: Missing argument for option -%c\n", ret);
+    #####:  139:                    exit(1);
+        -:  140:                }
+        3:  141:                val = strtol(optarg, &endptr, 10);
+        3:  142:                if (*endptr != '\0' || val <= 0 || val > 65535) {
+    #####:  143:                    fprintf(stderr,"ERROR: Invalid argument for PORT\n");
+    #####:  144:                    exit(1);
+        -:  145:                }
+        3:  146:                flag_p = 1;
+        3:  147:                PORT = optarg;
+        3:  148:                break;
+        -:  149:            }
+        3:  150:            case 'h': {
+        3:  151:                if(flag_f){
+    #####:  152:                    fprintf(stderr, "ERROR: cannot use -f and (-p, -h) together\n");
+    #####:  153:                    exit(1);
+        -:  154:                }
+        3:  155:                if (optarg == NULL) {
+    #####:  156:                    fprintf(stderr, "ERROR: Missing argument for option -%c\n", ret);
+    #####:  157:                    exit(1);
+        -:  158:                }
+        3:  159:                flag_h = 1;
+        3:  160:                IP = optarg;
+        3:  161:                break;
+        -:  162:            }
+        2:  163:            case 'f': {
+        2:  164:                if(flag_h || flag_p){
+    #####:  165:                    fprintf(stderr, "ERROR: cannot use -f and (-p, -h) together\n");
+    #####:  166:                    exit(1);
+        -:  167:                }
+        2:  168:                if (optarg == NULL) {
+    #####:  169:                    fprintf(stderr, "ERROR: Missing argument for option -%c\n", ret);
+    #####:  170:                    exit(1);
+        -:  171:                }
+        2:  172:                flag_f = 1;
+        2:  173:                PATH = optarg;
+        2:  174:                break;
+        -:  175:            }
+        -:  176:        }
+        8:  177:        ret = getopt(argc, argv, ":p:h:f:");
+        -:  178:    }
+        -:  179:
+        5:  180:    if((flag_p !=1 && flag_h ==1) || (flag_h != 1 && flag_p ==1)){
+    #####:  181:        fprintf(stderr, "ERROR: -h should come with -p, vice versa \n");
+    #####:  182:        exit(1);
+       5*:  183:    }else if(flag_p == 0 && flag_f == 0 && flag_h == 0){
+    #####:  184:        fprintf(stderr, "ERROR: no valid input \n");
+    #####:  185:        exit(1);
+        -:  186:    }
+        -:  187:
+        -:  188:
+        -:  189:
+        5:  190:    if(flag_h && flag_p){
+        -:  191:        // Initialize hints structure with zeros
+        3:  192:        memset(&hints, 0, sizeof hints);
+        3:  193:        hints.ai_family = AF_UNSPEC;    // Allow either IPv4 or IPv6
+        3:  194:        hints.ai_socktype = SOCK_STREAM; // Use TCP stream sockets
+        -:  195:
+        -:  196:        // Get address information for the server using the provided hostname
+        3:  197:        if ((rv = getaddrinfo(IP, PORT, &hints, &servinfo)) != 0) {
+    #####:  198:            fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
+    #####:  199:            return 1;
+        -:  200:        }
+        -:  201:
+        -:  202:
+        -:  203:
+        -:  204:        // Loop through all the results and connect to the first server we can
+        6:  205:        for(p = servinfo; p != NULL; p = p->ai_next) {
+        -:  206:            // Try to create a socket with the current address info
+       6*:  207:            if ((sockfd = socket(p->ai_family, p->ai_socktype,
+        -:  208:                    p->ai_protocol)) == -1) {
+    #####:  209:                perror("client: socket");
+    #####:  210:                continue;  // If socket creation fails, try the next address
+        -:  211:            }
+        -:  212:
+        -:  213:            // Convert the IP address to a readable string format and display it
+        6:  214:            inet_ntop(p->ai_family,
+        6:  215:                get_in_addr((struct sockaddr *)p->ai_addr),
+        -:  216:                s, sizeof s);
+        6:  217:            printf("client: attempting connection to %s\n", s);
+        -:  218:
+        -:  219:            // Attempt to connect to the server
+        6:  220:            if (connect(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
+        3:  221:                perror("client: connect");
+        3:  222:                close(sockfd);  // Close the socket if connection fails
+        3:  223:                continue;       // Try the next address
+        -:  224:            }
+        -:  225:
+        3:  226:            break;  // If we get here, we successfully connected
+        -:  227:        }
+        -:  228:
+        -:  229:        // If p is NULL, it means we couldn't connect to any address
+        3:  230:        if (p == NULL) {
+    #####:  231:            fprintf(stderr, "client: failed to connect\n");
+    #####:  232:            return 2;
+        -:  233:        }
+        -:  234:
+        -:  235:        // Convert connected server's address to string and print it
+        3:  236:        inet_ntop(p->ai_family, get_in_addr((struct sockaddr *)p->ai_addr),
+        -:  237:                s, sizeof s);
+        3:  238:        printf("client: connected to %s\n", s);
+        -:  239:
+        3:  240:        freeaddrinfo(servinfo); // Free the linked list of addresses, no longer needed
+        2:  241:    }else if(flag_f){
+        -:  242:        struct sockaddr_un addr;
+        -:  243:        // create fd for the UNIX stream socket
+        2:  244:        sockfd = socket(AF_UNIX, SOCK_STREAM, 0);
+        -:  245:
+        -:  246:        // check if failed to create FD
+        2:  247:        if(sockfd == -1){
+    #####:  248:            perror("unix stream socket");
+    #####:  249:            exit(1);
+        -:  250:        }
+        -:  251:        
+        -:  252:        // preparing server address struct
+        2:  253:        memset(&addr,0,sizeof(struct sockaddr_un));
+        2:  254:        addr.sun_family = AF_UNIX;
+        2:  255:        strcpy(addr.sun_path, PATH);
+        -:  256:
+        2:  257:        if(connect(sockfd,(struct sockaddr*)&addr,sizeof(addr)) == -1 ){
+    #####:  258:            perror("connect");
+    #####:  259:            exit(1);
+        -:  260:        }
+        -:  261:    }
+        -:  262:        // GET USER INPUT
+        -:  263:        unsigned long long amount;
+        -:  264:        char atom[10];
+        5:  265:        ask_supplier(&amount, atom, sizeof(atom));
+        -:  266:
+        -:  267:        // Format the message to send to server: ADD {atom} {amount}
+        -:  268:        char send_buf[MAXDATASIZE];
+        5:  269:        snprintf(send_buf, MAXDATASIZE, "ADD %s %llu", atom, amount);
+        -:  270:
+        -:  271:    
+        -:  272:
+        5:  273:        if(flag_h && flag_p){
+        -:  274:        // Send the formatted request to server
+        3:  275:        if (send(sockfd, send_buf, strlen(send_buf), 0) == -1) {
+    #####:  276:            perror("send");
+    #####:  277:            close(sockfd);
+    #####:  278:            exit(1);
+        -:  279:        }
+        -:  280:
+        3:  281:        printf("client: sent request --> '%s'\n", send_buf);
+        -:  282:
+        -:  283:        // Receive data from the server
+        3:  284:        if ((numbytes = recv(sockfd, buf, MAXDATASIZE-1, 0)) == -1) {
+    #####:  285:            perror("recv");
+    #####:  286:            exit(1);
+        -:  287:        }
+        -:  288:
+        -:  289:        // Null-terminate the received data to make it a valid string
+        2:  290:    } else if(flag_f){
+        2:  291:        if (write(sockfd, send_buf, strlen(send_buf)) == -1) {
+    #####:  292:            perror("write");
+    #####:  293:            close(sockfd);
+    #####:  294:            exit(1);
+        -:  295:        }
+        -:  296:
+        2:  297:        printf("client: sent request --> '%s'\n", send_buf);
+        -:  298:
+        -:  299:        // Signal EOF to the server (no more data will be sent)
+        2:  300:        shutdown(sockfd, SHUT_WR);
+        -:  301:
+        -:  302:        // Receive data from the server
+        2:  303:        if ((numbytes = read(sockfd, buf, MAXDATASIZE-1)) == -1) {
+    #####:  304:            perror("read");
+    #####:  305:            exit(1);
+        -:  306:        }
+        -:  307:    }
+        5:  308:    buf[numbytes] = '\0';
+        -:  309:    // Print the message received from the server
+        5:  310:    printf("client: received '%s'\n", buf);
+        -:  311:
+        -:  312:    // Clean up by closing the socket
+        5:  313:    close(sockfd);
+        5:  314:    return 0;
+        -:  315:}

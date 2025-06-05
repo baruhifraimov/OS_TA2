@@ -1,0 +1,269 @@
+#!/usr/bin/env bash
+# Enhanced coverage script - comprehensive testing for 90%+ coverage
+set -euo pipefail
+
+# Find available ports
+find_free_port() {
+    python3 -c "import socket; s=socket.socket(); s.bind(('',0)); print(s.getsockname()[1]); s.close()"
+}
+
+# Configuration - use dynamic ports to avoid conflicts
+TCP_PORT=$(find_free_port)
+UDP_PORT=$(find_free_port)
+STREAM_SOCK="/tmp/stream_$$_$RANDOM.sock"
+DGRAM_SOCK="/tmp/dgram_$$_$RANDOM.sock"
+STORAGE_FILE="./storage_test_$$.txt"
+
+cleanup() {
+    echo "Cleaning up..."
+    pkill -f drinks_bar || true
+    rm -f "$STREAM_SOCK" "$DGRAM_SOCK" "$STORAGE_FILE" || true
+    sleep 1
+}
+
+trap cleanup EXIT
+
+echo "=== ENHANCED COVERAGE TESTING SCRIPT ==="
+echo "Using TCP Port: $TCP_PORT, UDP Port: $UDP_PORT"
+
+# Kill any existing processes
+pkill -f drinks_bar || true
+sleep 1
+
+echo "Building executables with coverage flags..."
+make clean
+make coverage_all
+
+echo "=== Testing Phase 1: Server with File Storage ==="
+# Start server with file storage and timeout
+./drinks_bar.out -T "$TCP_PORT" -U "$UDP_PORT" -s "$STREAM_SOCK" -d "$DGRAM_SOCK" -f "$STORAGE_FILE" -c 20 -o 30 -h 40 -t 300 &
+SERVER_PID=$!
+sleep 3
+
+# Wait for server to be ready
+while ! nc -z localhost "$TCP_PORT" 2>/dev/null; do
+    sleep 0.5
+    if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+        echo "Server failed to start"
+        exit 1
+    fi
+done
+
+echo "Server started successfully on ports $TCP_PORT (TCP) and $UDP_PORT (UDP)"
+
+# Test TCP ADD commands
+echo "Testing TCP ADD commands..."
+echo -e "1\n5" | ./atom_supplier.out -h localhost -p "$TCP_PORT"
+echo -e "2\n8" | ./atom_supplier.out -h localhost -p "$TCP_PORT"
+echo -e "3\n12" | ./atom_supplier.out -h localhost -p "$TCP_PORT"
+
+# Test UDP DELIVER commands
+echo "Testing UDP DELIVER commands..."
+echo -e "1\n3" | ./molecule_requester.out -h localhost -p "$UDP_PORT"
+echo -e "2\n2" | ./molecule_requester.out -h localhost -p "$UDP_PORT"
+echo -e "3\n1" | ./molecule_requester.out -h localhost -p "$UDP_PORT"
+echo -e "4\n1" | ./molecule_requester.out -h localhost -p "$UDP_PORT"
+
+# Test Unix domain sockets
+echo "Testing Unix Domain Sockets..."
+echo -e "1\n7" | ./atom_supplier.out -f "$STREAM_SOCK"
+echo -e "2\n4" | ./atom_supplier.out -f "$STREAM_SOCK"
+echo -e "1\n2" | ./molecule_requester.out -f "$DGRAM_SOCK"
+echo -e "3\n1" | ./molecule_requester.out -f "$DGRAM_SOCK"
+
+# Test keyboard commands via stdin (avoiding the spam issue)
+echo "Testing server keyboard commands..."
+{
+    echo "GEN SOFT DRINK"
+    echo "GEN VODKA"
+    echo "GEN CHAMPAGNE"
+    echo "invalid command"
+    echo "ADD invalid"
+    echo "DELIVER invalid"
+} | nc localhost "$TCP_PORT" || true
+
+# Test insufficient resources scenarios
+echo "Testing insufficient resource scenarios..."
+echo -e "1\n100" | ./molecule_requester.out -h localhost -p "$UDP_PORT"
+echo -e "3\n50" | ./molecule_requester.out -h localhost -p "$UDP_PORT"
+
+# Stop server
+kill "$SERVER_PID" 2>/dev/null || true
+wait "$SERVER_PID" 2>/dev/null || true
+sleep 2
+
+echo "=== Testing Phase 2: Error Conditions ==="
+# Test invalid arguments to improve coverage of error paths
+echo "Testing error conditions..."
+
+# Invalid port numbers
+./atom_supplier.out -h localhost -p 999999 2>/dev/null || true
+./molecule_requester.out -h localhost -p -1 2>/dev/null || true
+
+# Missing arguments
+./atom_supplier.out -h 2>/dev/null || true
+./atom_supplier.out -p 2>/dev/null || true
+./molecule_requester.out -p 2>/dev/null || true
+./molecule_requester.out -h 2>/dev/null || true
+
+# Conflicting flags
+./atom_supplier.out -h localhost -p 8080 -f /tmp/test 2>/dev/null || true
+./molecule_requester.out -h localhost -p 8080 -f /tmp/test 2>/dev/null || true
+
+# Invalid flag combinations
+./atom_supplier.out -h localhost 2>/dev/null || true
+./atom_supplier.out -p 8080 2>/dev/null || true
+
+echo "=== Testing Phase 3: Server without File Storage ==="
+# Test server without file storage
+./drinks_bar.out -T "$TCP_PORT" -U "$UDP_PORT" -s "$STREAM_SOCK" -d "$DGRAM_SOCK" -c 15 -o 25 -h 35 -t 300 &
+SERVER_PID=$!
+sleep 3
+
+# Wait for server to be ready
+while ! nc -z localhost "$TCP_PORT" 2>/dev/null; do
+    sleep 0.5
+    if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+        echo "Server failed to start in phase 3"
+        exit 1
+    fi
+done
+
+echo "Phase 3 server started successfully"
+
+# More comprehensive testing
+echo "Testing comprehensive scenarios..."
+echo -e "1\n10" | ./atom_supplier.out -h localhost -p "$TCP_PORT"
+echo -e "2\n15" | ./atom_supplier.out -h localhost -p "$TCP_PORT"
+echo -e "3\n20" | ./atom_supplier.out -h localhost -p "$TCP_PORT"
+
+# Test with different amounts
+echo -e "1\n5" | ./molecule_requester.out -h localhost -p "$UDP_PORT"
+echo -e "2\n3" | ./molecule_requester.out -h localhost -p "$UDP_PORT"
+echo -e "4\n2" | ./molecule_requester.out -h localhost -p "$UDP_PORT"
+
+# Test more Unix domain sockets
+echo -e "3\n15" | ./atom_supplier.out -f "$STREAM_SOCK"
+echo -e "2\n3" | ./molecule_requester.out -f "$DGRAM_SOCK"
+
+# Stop server
+kill "$SERVER_PID" 2>/dev/null || true
+wait "$SERVER_PID" 2>/dev/null || true
+sleep 2
+
+echo "=== Testing Phase 4: Connection Failures ==="
+# Test connection to non-existent server
+echo "Testing connection failures..."
+echo -e "1\n5" | ./atom_supplier.out -h localhost -p 9999 2>/dev/null || true
+echo -e "1\n5" | ./molecule_requester.out -h localhost -p 9999 2>/dev/null || true
+
+# Test invalid Unix socket paths
+echo -e "1\n5" | ./atom_supplier.out -f /nonexistent/path 2>/dev/null || true
+echo -e "1\n5" | ./molecule_requester.out -f /nonexistent/path 2>/dev/null || true
+
+echo "=== Testing Phase 5: Edge Cases ==="
+# Test edge cases to improve coverage
+
+# Test server with invalid arguments
+./drinks_bar.out -T invalid 2>/dev/null || true
+./drinks_bar.out -U invalid 2>/dev/null || true
+./drinks_bar.out -c invalid 2>/dev/null || true
+./drinks_bar.out -o invalid 2>/dev/null || true
+./drinks_bar.out -h invalid 2>/dev/null || true
+
+# Test with minimum arguments
+./drinks_bar.out -T "$TCP_PORT" -U "$UDP_PORT" &
+MINIMAL_SERVER_PID=$!
+sleep 2
+
+if kill -0 "$MINIMAL_SERVER_PID" 2>/dev/null; then
+    echo -e "1\n1" | ./atom_supplier.out -h localhost -p "$TCP_PORT" || true
+    echo -e "1\n1" | ./molecule_requester.out -h localhost -p "$UDP_PORT" || true
+    kill "$MINIMAL_SERVER_PID" 2>/dev/null || true
+    wait "$MINIMAL_SERVER_PID" 2>/dev/null || true
+fi
+
+echo "=== Generating Coverage Reports ==="
+mkdir -p coverage_results
+echo "Generating coverage data..."
+
+# Generate gcov reports
+gcov -o obj src/*.c > coverage_results/gcov_output.txt 2>&1 || true
+
+# Preserve .gcov files
+if ls *.gcov 1> /dev/null 2>&1; then
+    mv *.gcov coverage_results/ 2>/dev/null || true
+fi
+
+echo "=== Coverage Analysis ==="
+# Parse coverage results more accurately
+TOTAL_COVERAGE=0
+FILE_COUNT=0
+declare -A file_coverage
+
+echo "Processing coverage data..."
+
+if [[ -f coverage_results/gcov_output.txt ]]; then
+    current_file=""
+    while IFS= read -r line; do
+        if [[ "$line" =~ ^File[[:space:]]\'([^\']+)\'$ ]]; then
+            current_file="${BASH_REMATCH[1]}"
+        elif [[ "$line" =~ ^Lines[[:space:]]executed:[[:space:]]*([0-9]+\.[0-9]+)%[[:space:]]*of[[:space:]]*([0-9]+) ]]; then
+            coverage="${BASH_REMATCH[1]}"
+            lines="${BASH_REMATCH[2]}"
+            
+            if [[ -n "$current_file" ]] && [[ "$current_file" == *".c" ]] && [[ "$lines" -gt 0 ]]; then
+                file_name=$(basename "$current_file")
+                # Only count each file once (avoid duplicates)
+                if [[ -z "${file_coverage[$file_name]:-}" ]]; then
+                    file_coverage[$file_name]="$coverage"
+                    echo "File: $file_name - Coverage: ${coverage}% ($lines lines)"
+                    TOTAL_COVERAGE=$(awk "BEGIN {printf \"%.2f\", $TOTAL_COVERAGE + $coverage}")
+                    FILE_COUNT=$((FILE_COUNT + 1))
+                fi
+            fi
+        fi
+    done < coverage_results/gcov_output.txt
+fi
+
+echo ""
+echo "=== COVERAGE SUMMARY ==="
+if [[ $FILE_COUNT -gt 0 ]]; then
+    AVERAGE_COVERAGE=$(awk "BEGIN {printf \"%.2f\", $TOTAL_COVERAGE / $FILE_COUNT}")
+    echo "Files analyzed: $FILE_COUNT"
+    echo "Average coverage: ${AVERAGE_COVERAGE}%"
+    
+    echo ""
+    echo "Per-file coverage:"
+    for file in "${!file_coverage[@]}"; do
+        echo "  $file: ${file_coverage[$file]}%"
+    done
+    
+    # Check if we meet the 90% threshold
+    if (( $(echo "$AVERAGE_COVERAGE >= 90.0" | bc -l) )); then
+        echo ""
+        echo "✅ SUCCESS: Coverage meets 90% threshold!"
+        echo "Coverage reports preserved in coverage_results/"
+        exit 0
+    else
+        echo ""
+        echo "❌ INSUFFICIENT: Coverage is below 90% threshold"
+        echo "Current coverage: ${AVERAGE_COVERAGE}%"
+        echo "Target: 90.0%"
+        echo "Gap: $(awk "BEGIN {printf \"%.2f\", 90.0 - $AVERAGE_COVERAGE}")%"
+        echo ""
+        echo "📋 Coverage reports available in coverage_results/"
+        echo "💡 Check .gcov files for detailed line-by-line coverage"
+        echo ""
+        echo "🔍 Suggestions to improve coverage:"
+        echo "  - Check uncovered lines in coverage_results/*.gcov files"
+        echo "  - Add more test cases for error conditions"
+        echo "  - Test edge cases and boundary conditions"
+        echo "  - Ensure all function branches are tested"
+        exit 1
+    fi
+else
+    echo "❌ ERROR: No coverage data found"
+    echo "Check that gcov is working properly and .gcno files exist"
+    exit 1
+fi

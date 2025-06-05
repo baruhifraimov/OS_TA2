@@ -4,7 +4,6 @@ CXXFLAGS = -Wall -g
 
 OBJ = ./obj/
 SRC = ./src/
-SRCFNC = ./src/functions/
 
 # for gcov() only
 GCOV_FLAGS = -fprofile-arcs -ftest-coverage
@@ -30,7 +29,6 @@ coverage-report:
 	@echo "Generating coverage reports..."
 	@mkdir -p $(OBJ)
 	gcov -o $(OBJ) $(SRC)*.c
-	gcov -o $(OBJ) $(SRCFNC)*.c
 	mv *.gcov $(OBJ)
 	@echo "Coverage reports are in $(OBJ)"
 
@@ -46,9 +44,6 @@ molecule_requester.out: $(OBJ)molecule_requester.o
 	$(CXX) $(CXXFLAGS) $(GCOV_FLAGS) $^ -o $@
 
 # Convert all source files to object files
-$(OBJ)%.o: $(SRCFNC)%.c
-	mkdir -p obj
-	$(CXX) $(CXXFLAGS) $(GCOV_FLAGS) -c $< -o $@
 
 $(OBJ)%.o: $(SRC)%.c
 	mkdir -p obj
@@ -56,7 +51,7 @@ $(OBJ)%.o: $(SRC)%.c
 
 
 clean:
-	rm -f *.o *.out *.txt *.gcov
+	rm -f *.o *.out
 	rm -r obj
 	clear
 
